@@ -1,4 +1,5 @@
 import json
+import subprocess
 import requests
 import os
 import os.path
@@ -11,6 +12,23 @@ import tarfile
 import gzip
 import myvariant
 from Bio.Seq import Seq
+
+def get_server_last_update_or_none(url, params):
+    """
+    Safely queries the server for the last update date.
+    Returns a datetime.date object, or None if server is unavailable.
+    """
+    try:
+        response = requests.get(url=url, params=params, timeout=10)
+        response.close()
+        if response.status_code == 200:
+            parts = response.text.split('-')
+            if len(parts) == 3:
+                return datetime.date(int(parts[0]), int(parts[1]), int(parts[2]))
+    except Exception as e:
+        print(f"[WARN] Could not contact server ({url}): {e}")
+    return None
+
 
 # get the associations and clumps from the Server
 def retrieveAssociationsAndClumps(refGen, traits, studyTypes, studyIDs, ethnicity, valueTypes, sexes, superPop, fileHash, extension, mafCohort):
@@ -27,7 +45,7 @@ def retrieveAssociationsAndClumps(refGen, traits, studyTypes, studyIDs, ethnicit
 
     if (ethnicity is not None):
         ethnicity = [sub.replace('_', ' ').replace('"', '').lower() for sub in ethnicity]
-        availableEthnicities = getUrlWithParams("https://prs.byu.edu/ethnicities", params={})
+        availableEthnicities = getCachedEthnicities()
         if (not bool(set(ethnicity) & set(availableEthnicities)) and studyIDs is None):
             raise SystemExit('\nThe ethnicities requested are invalid. \nPlease use an ethnicity option from the list: \n\n{}'.format(availableEthnicities))
 
@@ -367,140 +385,106 @@ def openFileForParsing(inputFile, isGWAS=False):
                 return TextIOWrapper(archive.extractfile(tarInfo))
     elif inputFile.lower().endswith(".gz") or inputFile.lower().endswith(".gzip"):
         return TextIOWrapper(gzip.open(inputFile, 'r'))
+    elif inputFile.lower().endswith(".bcf"):
+        # Abrir BCF como VCF texto via bcftools
+        cmd = ["bcftools", "view", inputFile, "-Ov"]
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, universal_newlines=True)
+        return process.stdout
     else:
         # default option for regular vcf and txt files
         return open(inputFile, 'r')
 
 
-def checkForAllAssociFile(refGen):
-    # assume we will need to download new files
-    dnldNewAllAssociFile = True
-    # check to see if the workingFiles directory is there, if not make the directory
+def checkForAllAssociFile(refGen, max_age_days=30):
+    """
+    Checks if the cached associations file needs to be refreshed.
+    If it's older than max_age_days, always redownload (don't check server).
+    If file is fresh (<max_age_days), just use cache (don't check server).
+    """
+    print("USING UPDATED checkForAllAssociFile")  # Debug
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     workingFilesPath = os.path.join(scriptPath, ".workingFiles")
-    # path to a file containing all the associations from the database
-    associFileName = "allAssociations_{refGen}.txt".format(refGen=refGen)
+    associFileName = f"allAssociations_{refGen}.txt"
     allAssociationsFile = os.path.join(workingFilesPath, associFileName)
 
-    # if the path exists, check if we don't need to download a new one
-    if os.path.exists(allAssociationsFile):
+    if not os.path.exists(allAssociationsFile):
+        print(f"[LOG] Cache file {associFileName} does not exist, will download.")
+        return True
 
-        # get date the database was last updated
-        params = {
-            "refGen": refGen
-        }
+    file_mod_time = os.path.getmtime(allAssociationsFile)
+    file_age_days = (time.time() - file_mod_time) / 86400
+    print(f"[LOG] Cache file {associFileName} is {file_age_days:.8f} days old.")
 
-        response = requests.get(url="https://prs.byu.edu/last_database_update", params=params)
-        response.close()
-        assert (response), "Error connecting to the server: {0} - {1}".format(response.status_code, response.reason) 
-        lastDatabaseUpdate = response.text
-        lastDatabaseUpdate = lastDatabaseUpdate.split("-")
-        lastDBUpdateDate = datetime.date(int(lastDatabaseUpdate[0]), int(lastDatabaseUpdate[1]), int(lastDatabaseUpdate[2]))
+    if file_age_days > max_age_days:
+        print(f"[LOG] Cache file {associFileName} is older than {max_age_days} days, will redownload.")
+        return True
 
-        fileModDateObj = time.localtime(os.path.getmtime(allAssociationsFile))
-        fileModDate = datetime.date(fileModDateObj.tm_year, fileModDateObj.tm_mon, fileModDateObj.tm_mday)
-        # if the file is newer than the database update, we don't need to download a new file
-        if (lastDBUpdateDate < fileModDate):
-            dnldNewAllAssociFile = False
-
-    return dnldNewAllAssociFile
-
+    # File is fresh enough, just use it
+    print(f"[LOG] Cache file {associFileName} is fresh (<= {max_age_days} days), will use cache.")
+    return False
 
 def checkForAllClumps(pop, refGen):
-    # assume we need to download new file
     dnldNewClumps = True
-    # check to see if the workingFiles directory is there, if not make the directory
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     workingFilesPath = os.path.join(scriptPath, ".workingFiles")
-
-    # path to a file containing all the clumps from the database
     allClumpsFile = os.path.join(workingFilesPath, "{0}_clumps_{1}.txt".format(pop, refGen))
 
-    # if the path exists, check if we don't need to download a new one
     if os.path.exists(allClumpsFile):
-        params = {
-            "refGen": refGen,
-            "superPop": pop
-        }
-
-        response = requests.get(url="https://prs.byu.edu/last_clumps_update", params=params)
-        response.close()
-        assert (response), "Error connecting to the server: {0} - {1}".format(response.status_code, response.reason)
-        lastClumpsUpdate = response.text
-        lastClumpsUpdate = lastClumpsUpdate.split('-')
-        lastClumpsUpdate = datetime.date(int(lastClumpsUpdate[0]), int(lastClumpsUpdate[1]), int(lastClumpsUpdate[2]))
-
+        params = {"refGen": refGen, "superPop": pop}
+        server_update = get_server_last_update_or_none("https://prs.byu.edu/last_clumps_update", params)
         fileModDateObj = time.localtime(os.path.getmtime(allClumpsFile))
         fileModDate = datetime.date(fileModDateObj.tm_year, fileModDateObj.tm_mon, fileModDateObj.tm_mday)
-        # if the file is newer than the database update, we don't need to download a new file
-        if (lastClumpsUpdate <= fileModDate):
+        if server_update is not None:
+            if (server_update <= fileModDate):
+                dnldNewClumps = False
+        else:
+            print("[WARN] Server unavailable for Clumps check. Using local cache if present.")
             dnldNewClumps = False
-
     return dnldNewClumps
 
 
 def checkForAllMAFFiles(mafCohort, refGen):
     dnldNewMaf = True
     pathExists = False
-    # check to see if the workingFiles directory is there, if not make the directory
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     workingFilesPath = os.path.join(scriptPath, ".workingFiles")
-
-    # path to a file containing all maf for the cohort from the database
     allMAFfile = os.path.join(workingFilesPath, "{0}_maf_{1}.txt".format(mafCohort, refGen))
 
-    # if the path exists, check if we don't need to download a new one
     if os.path.exists(allMAFfile):
         pathExists = True
-        params = {
-            "cohort": mafCohort,
-            "refGen": refGen
-        }
-
-        response = requests.get(url="https://prs.byu.edu/last_maf_update", params=params)
-        response.close()
-        assert (response), "Error connecting to the server: {0} - {1}".format(response.status_code, response.reason)
-        lastMafUpdate = response.text
-        lastMafUpdate = lastMafUpdate.split('-')
-        lastMafUpdate = datetime.date(int(lastMafUpdate[0]), int(lastMafUpdate[1]), int(lastMafUpdate[2]))
-
+        params = {"cohort": mafCohort, "refGen": refGen}
+        server_update = get_server_last_update_or_none("https://prs.byu.edu/last_maf_update", params)
         fileModDateObj = time.localtime(os.path.getmtime(allMAFfile))
         fileModDate = datetime.date(fileModDateObj.tm_year, fileModDateObj.tm_mon, fileModDateObj.tm_mday)
-        # if the file is newer than the database update, we don't need to download a new file
-        if (lastMafUpdate <= fileModDate):
-            dnldNewMaf = False
-
+        if server_update is not None:
+            if (server_update <= fileModDate):
+                dnldNewMaf = False
+        else:
+            print("[WARN] Server unavailable for MAF check. Using local cache if present.")
+            dnldNewMaf = False  # Assume cache is ok
     return dnldNewMaf, pathExists
+
 
 
 def checkForAllPercentilesFiles(percentilesCohort):
     dnldNewPercentiles = True
-    # check to see if the workingFiles directory is there, if not make the directory
     scriptPath = os.path.dirname(os.path.abspath(__file__))
     workingFilesPath = os.path.join(scriptPath, ".workingFiles")
-    # path to a file containing all maf for the cohort from the database
     allPercentilesfile = os.path.join(workingFilesPath, "allPercentiles_{}.txt".format(percentilesCohort))
 
-     # if the path exists, check if we don't need to download a new one
     if os.path.exists(allPercentilesfile):
-        params = {
-            "cohort": percentilesCohort
-        }
-
-        response = requests.get(url="https://prs.byu.edu/last_percentiles_update", params=params)
-        response.close()
-        assert (response), "Error connecting to the server: {0} - {1}".format(response.status_code, response.reason)
-        lastPercentilesUpdate = response.text
-        lastPercentilesUpdate = lastPercentilesUpdate.split('-')
-        lastPercentilesUpdate = datetime.date(int(lastPercentilesUpdate[0]), int(lastPercentilesUpdate[1]), int(lastPercentilesUpdate[2]))
-
+        params = {"cohort": percentilesCohort}
+        server_update = get_server_last_update_or_none("https://prs.byu.edu/last_percentiles_update", params)
         fileModDateObj = time.localtime(os.path.getmtime(allPercentilesfile))
         fileModDate = datetime.date(fileModDateObj.tm_year, fileModDateObj.tm_mon, fileModDateObj.tm_mday)
-        # if the file is newer than the database update, we don't need to download a new file
-        if (lastPercentilesUpdate <= fileModDate):
+        if server_update is not None:
+            if (server_update <= fileModDate):
+                dnldNewPercentiles = False
+        else:
+            print("[WARN] Server unavailable for Percentiles check. Using local cache if present.")
             dnldNewPercentiles = False
-
     return dnldNewPercentiles
+
 
 
 # gets associations obj download from the Server
@@ -737,6 +721,10 @@ def getVariantAlleles(rsID, mv):
 
 # for POST urls
 def postUrlWithBody(url, body):
+    import json
+    print(f"[LOG] POST URL: {url}")
+    print(f"[LOG] POST BODY: {json.dumps(body, ensure_ascii=False)}")
+
     response = requests.post(url=url, data=body)
     response.close()
     if response.status_code == 504:
@@ -748,8 +736,14 @@ def postUrlWithBody(url, body):
     return response.json() 
 
 
+
 # for GET urls
 def getUrlWithParams(url, params):
+    # Monta a URL completa para exibir antes do request
+    import urllib.parse
+    full_url = url + '?' + urllib.parse.urlencode(params, doseq=True)
+    print(f"[LOG] GET URL: {full_url}")
+
     response = requests.get(url=url, params=params)
     response.close()
     assert (response), "Error connecting to the server: {0} - {1}".format(response.status_code, response.reason) 
@@ -888,6 +882,31 @@ def getSpecificStudySnps(finalStudyList):
         raise SystemExit("ERROR: 504 - Connection to the server timed out")
     
     return studySnps
+
+def getCachedEthnicities(max_age_days=30):
+    import json
+
+    workingFilesPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".workingFiles")
+    ethnicity_file = os.path.join(workingFilesPath, "ethnicities.txt")
+
+    # 1. If file exists and is recent, use cache
+    if os.path.exists(ethnicity_file):
+        file_mod_time = os.path.getmtime(ethnicity_file)
+        file_age_days = (time.time() - file_mod_time) / 86400
+        if file_age_days < max_age_days:
+            with open(ethnicity_file, 'r', encoding="utf-8") as f:
+                try:
+                    return json.load(f)
+                except Exception:
+                    pass  # In case cache is corrupted, fall back to download
+
+    # 2. If not cached or too old, fetch and update cache
+    result = getUrlWithParams("https://prs.byu.edu/ethnicities", params={})
+    if not os.path.exists(workingFilesPath):
+        os.mkdir(workingFilesPath)
+    with open(ethnicity_file, 'w', encoding="utf-8") as f:
+        json.dump(result, f, indent=2)
+    return result
 
 
 def checkInternetConnection():

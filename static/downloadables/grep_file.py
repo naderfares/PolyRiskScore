@@ -3,8 +3,22 @@ import tarfile
 import gzip
 import os.path
 import json
+import subprocess
+import tempfile
+
 from sys import argv
 from connect_to_server import getPreferredPop, openFileForParsing
+
+def open_bcf_with_bcftools(input_bcf_path, bcftools_args=None):
+    """
+    Abre BCF via bcftools view e retorna um iterador de linhas (como VCF texto).
+    """
+    cmd = ["bcftools", "view", input_bcf_path, "-Ov"]
+    if bcftools_args:
+        cmd.extend(bcftools_args)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, universal_newlines=True)
+    return process.stdout
+
 
 # filter the input vcf or txt file so that it only include SNPs that exist in the PRSKB database
 def createFilteredFile(inputFilePath, fileHash, requiredParamsHash, superPop, refGen, sexes, valueTypes, p_cutOff, traits, studyTypes, studyIDs, ethnicities, extension, timestamp, useGWASupload):
@@ -14,7 +28,8 @@ def createFilteredFile(inputFilePath, fileHash, requiredParamsHash, superPop, re
 
     # tells us if we were passed rsIDs or a vcf
     isRSids = True if extension.lower().endswith(".txt") or inputFilePath.lower().endswith(".txt") else False
-    
+    isBCF = extension.lower().endswith(".bcf") or inputFilePath.lower().endswith(".bcf")
+
     # get the associations, clumps, study snps, and the paths to the filtered input file and the clump number file
     tableObjDict, allClumpsObjDict, studySnpsDict, filteredInputPath, clumpNumPath, isPreFiltered = getFilesAndPaths(fileHash, requiredParamsHash, superPop, refGen, isRSids, timestamp, useGWASupload)
 
@@ -47,10 +62,20 @@ def createFilteredFile(inputFilePath, fileHash, requiredParamsHash, superPop, re
         raise SystemExit("WARNING: None of the studies in the database match the specified filters. Adjust your filters and try again.")
 
     # create a new filtered file that only includes associations in the user-specified studies
-    if isRSids:
-        clumpNumDict = filterTXT(allClumpsObjDict, allSnps, inputFiles, filteredInputPath,useGWASupload)
+    if isBCF:
+        clumpNumDict = filterVCF(
+            tableObjDict, allClumpsObjDict, allSnps, inputFiles,
+            filteredInputPath, useGWASupload, isBCF=True
+        )
+    elif isRSids:
+        clumpNumDict = filterTXT(
+            allClumpsObjDict, allSnps, inputFiles, filteredInputPath, useGWASupload
+        )
     else:
-        clumpNumDict = filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredInputPath, useGWASupload)
+        clumpNumDict = filterVCF(
+            tableObjDict, allClumpsObjDict, allSnps, inputFiles,
+            filteredInputPath, useGWASupload, isBCF=False
+        )
 
     # write the clumpNumDict to a file for future use
     # the clumpNumDict is used to determine which variants aren't in LD with any of the other variants in the study
@@ -246,7 +271,7 @@ def filterTXT(allClumpsObjDict, allSnps, inputFiles, filteredFilePath, useGWASup
     return clumpNumDict
 
 
-def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFilePath, useGWASupload):
+def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFilePath, useGWASupload, isBCF=False):
     usedSnps = set()
     # create a set to keep track of which ld clump numbers are assigned to only a single snp
     clumpNumDict = {}
@@ -260,7 +285,10 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
 
         for aFile in inputFiles:
             # open the input file path for opening
-            inputVCF = openFileForParsing(aFile)
+            if isBCF:
+                inputVCF = open_bcf_with_bcftools(aFile)
+            else:
+                inputVCF = openFileForParsing(aFile)
 
             try:
                 allPosInInput = set()

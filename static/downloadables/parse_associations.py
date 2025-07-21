@@ -10,6 +10,7 @@ import os.path
 from collections import defaultdict
 import hashlib
 from connect_to_server import getPreferredPop, formatMafCohort
+from connect_to_server import openFileForParsing
 
 def parseAndCalculateFiles(params):
     # initialize the parameters used in multiprocessing
@@ -420,7 +421,7 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
 
     # open the tempFile as a vcf reader now
     if sampleNum > 50:
-        vcf_reader = vcf.Reader(open(useFilePath, 'r'))
+        vcf_reader = vcf.Reader(openFileForParsing(useFilePath))
     else:
         vcf_reader = vcf.Reader(useFilePath)
 
@@ -670,7 +671,8 @@ def takeComplement(possibleAlleles, alleles, REF, ALT):
 
 def getSamples(inputFilePath, header):
     # Open filtered file
-    vcf_reader = vcf.Reader(open(inputFilePath, 'r'))
+    from connect_to_server import openFileForParsing
+    vcf_reader = vcf.Reader(openFileForParsing(inputFilePath))
     samples = vcf_reader.samples
     header.extend(samples)
     return header

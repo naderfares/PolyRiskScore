@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="static">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/static/sample.zip!/" />
+      <root url="jar://$PROJECT_DIR$/static/sampleGwas.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # ########################################################################
-# 
+#
 version="1.9.0"
 #
-# 
-# 
+#
+#
 # HISTORY:
-# 
+#
 # * 8/28/2020 - v1.0.0  - First Creation
 #   Parameter order:
-#       1 VCF file path OR rsIDs file path 
+#       1 VCF file path OR rsIDs file path
 #       2 output file path (tsv or txt format)
 #       3 p-value cutoff (ex: 0.05)
 #       4 refGen {hg17, hg18, hg19, hg38}
@@ -21,14 +21,14 @@ version="1.9.0"
 #       --k studyType ex. ["HI", "LC", "O"]
 #       --s studyIDs ex. ["GCST000727", "GCST009496"]
 #       --e ethnicity ex. ["European", "East Asian"]
-# 
+#
 # * 9/18/2020 - v1.1.0  - Option for two steps
 #
 #   OPTIONAL PARAMETERS (added):
 #       --step stepNumber ex. (1 or 2)
 #
 # * 10/8/2020 - v1.2.0 (should technically be 2.0.0)
-# 
+#
 #   Now using getopts. Parameters updated
 #   REQUIRED PARAMS:
 #       -f input file path (VCF or TXT with rsIDs)
@@ -52,12 +52,12 @@ version="1.9.0"
 #       -n number of processes
 #
 # * 1/29/21 - v1.4.0
-#   
+#
 #   Added the ability to calculate scores using vcf/txt
 #   files zipped in zip, tar-like, and gz-like formats
 #
 # * 2/8/21 - v1.5.0
-#   
+#
 #   Changed csv output type to tsv.
 #
 #   4/20/21 - v1.6.0
@@ -85,7 +85,7 @@ version="1.9.0"
 #   added a parameter to set a cutoff value for minor allele frequencies (-x)
 #
 #   5/5/2022
-#   
+#
 #   various bug fixes and improvements
 #
 # ########################################################################
@@ -106,9 +106,9 @@ prskbMenu () {
     echo -e "\n$HORIZONTALLINE"
     echo -e "                   ${LIGHTBLUE}PRSKB Command-Line Menu/Instructions${NC}"
     echo -e "$HORIZONTALLINE"
-    echo "Welcome to the PRSKB command-line menu. Here you can learn about the different" 
-    echo "parameters required to run a polygenic risk score (PRS) calculation, search" 
-    echo "for a specific study or diesease, display available ethnicities for filtering," 
+    echo "Welcome to the PRSKB command-line menu. Here you can learn about the different"
+    echo "parameters required to run a polygenic risk score (PRS) calculation, search"
+    echo "for a specific study or diesease, display available ethnicities for filtering,"
     echo "view usage, or run the PRSKB calculator."
     echo ""
     echo "Select an option below by entering the corresponding number"
@@ -125,16 +125,16 @@ usage () {
     echo -e "   ${MYSTERYCOLOR}-t${NC} traitList ex. -t acne -t insomnia -t \"Alzheimer's disease\""
     echo -e "   ${MYSTERYCOLOR}-k${NC} studyType ex. -k HI -k LC -k O (High Impact, Large Cohort, Other studies)"
     echo -e "   ${MYSTERYCOLOR}-i${NC} studyIDs ex. -i GCST000727 -i GCST009496"
-    echo -e "   ${MYSTERYCOLOR}-e${NC} ethnicity ex. -e European -e \"East Asian\"" 
+    echo -e "   ${MYSTERYCOLOR}-e${NC} ethnicity ex. -e European -e \"East Asian\""
     echo -e "   ${MYSTERYCOLOR}-y${NC} value type ex. -y beta -y \"Odds Ratio\""
     echo -e "   ${MYSTERYCOLOR}-g${NC} sex in study ex. -g male -g female -g exclude"
     echo -e "${MYSTERYCOLOR}Additional Optional parameters: "
     echo -e "   ${MYSTERYCOLOR}-v${NC} verbose ex. -v (indicates a more detailed TSV result file. By default, JSON output will already be verbose.)"
-    echo -e "   ${MYSTERYCOLOR}-s${NC} stepNumber ex. -s 1 or -s 2"    
+    echo -e "   ${MYSTERYCOLOR}-s${NC} stepNumber ex. -s 1 or -s 2"
     echo -e "   ${MYSTERYCOLOR}-n${NC} number of subprocesses ex. -n 2 (By default, the calculations will be run on all available subprocesses)"
     echo -e "   ${MYSTERYCOLOR}-u${NC} path to GWAS data to use for calculations. Data in file MUST be tab separated and include the correct columns (see 'Learn about user supplied GWAS data for calculations' or the CLI readme)"
     echo -e "   ${MYSTERYCOLOR}-a${NC} reference genome used in the GWAS data file"
-    echo -e "   ${MYSTERYCOLOR}-b${NC} indicates that the user supplied GWAS data uses beta coefficent values instead of odds ratios" 
+    echo -e "   ${MYSTERYCOLOR}-b${NC} indicates that the user supplied GWAS data uses beta coefficent values instead of odds ratios"
     echo -e "   ${MYSTERYCOLOR}-q${NC} sets the minor allele frequency cohort to be used (also is the cohort used for reporting percentiles) ex. -q adni-ad (see the menu to learn more about the cohorts available)"
     echo -e "   ${MYSTERYCOLOR}-m${NC} omits reporting percentiles"
     echo -e "   ${MYSTERYCOLOR}-x${NC} sets the cutoff minor allele frequency value"
@@ -162,7 +162,7 @@ chooseOption () {
         read -p "#? " option
         echo ""
 
-        case $option in 
+        case $option in
             1 ) learnAboutParameters ;;
             2 ) searchTraitsAndStudies ;;
             3 ) printEthnicities ;;
@@ -189,7 +189,7 @@ learnAboutParameters () {
     echo ""
 
     while [[ "$cont" != "0" ]]
-    do 
+    do
         echo    " _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
         echo    "|                                                                 |"
         echo -e "|${LIGHTPURPLE}REQUIRED PARAMS: ${NC}                                                |"
@@ -225,9 +225,9 @@ learnAboutParameters () {
         read -p "#? " option
         echo ""
 
-        case $option in 
-            1 ) echo -e "${MYSTERYCOLOR}-f VCF File path or rsIDs:genotypes file path: ${NC}" 
-                echo "The path to the VCF file that contains the samples for which you would like " 
+        case $option in
+            1 ) echo -e "${MYSTERYCOLOR}-f VCF File path or rsIDs:genotypes file path: ${NC}"
+                echo "The path to the VCF file that contains the samples for which you would like "
                 echo "the polygenic risk scores calculated. Alternativly, the path to a TXT file that"
                 echo "contains rsIDs in the format of 1 rsID per line, with the genotypes following"
                 echo "on the same line. (ex. rs6656401:AA or rs6656401:A)"
@@ -240,25 +240,25 @@ learnAboutParameters () {
                 echo ""
                 echo "File names/directories should not contain spaces."
                 echo "" ;;
-            2 ) echo -e "${MYSTERYCOLOR}-o Output File path: ${NC}" 
+            2 ) echo -e "${MYSTERYCOLOR}-o Output File path: ${NC}"
                 echo "The path to the file that will contain the final polygenic risk scores. The "
-                echo -e "permitted extensions are ${GREEN}.tsv${NC} or ${GREEN}.json${NC} and will dictate the" 
+                echo -e "permitted extensions are ${GREEN}.tsv${NC} or ${GREEN}.json${NC} and will dictate the"
                 echo "format of the outputted results."
                 echo "" ;;
             3 ) echo -e "${MYSTERYCOLOR}-c P-value Cutoff: ${NC}"
                 echo "This parameter dictates which SNPs will be used in the PRS calculation. "
-                echo "Those SNPs with p-values less than or equal to the given cutoff will be " 
-                echo "included. "  
+                echo "Those SNPs with p-values less than or equal to the given cutoff will be "
+                echo "included. "
                 echo "" ;;
             4 ) echo -e "${MYSTERYCOLOR}-r RefGen (Reference Genome): ${NC}"
-                echo "This parameter tells us which reference genome was used to identify the variants " 
+                echo "This parameter tells us which reference genome was used to identify the variants "
                 echo -e "in the input VCF file. Available options are ${GREEN}hg17${NC}, ${GREEN}hg18${NC}, ${GREEN}hg19${NC}, and ${GREEN}hg38${NC}."
                 echo ""
-                echo -e "${LIGHTRED}**NOTE:${NC} This parameter is not required for .txt files and will be defaulted to ${GREEN}hg38${NC} in that case if the user does not select a refGen." 
+                echo -e "${LIGHTRED}**NOTE:${NC} This parameter is not required for .txt files and will be defaulted to ${GREEN}hg38${NC} in that case if the user does not select a refGen."
                 echo "" ;;
             5 ) echo -e "${MYSTERYCOLOR}-p Preferred GWA Study Super Population: ${NC}"
                 echo "This parameter is required for us to run Linkage Disequilibrium on "
-                echo "SNPs for PRS calculation. We use the five super populations from the " 
+                echo "SNPs for PRS calculation. We use the five super populations from the "
                 echo "1000 Genomes as the available options. Most studies have one or more super"
                 echo "populations reported. We ask users for their preferred super population to"
                 echo "help us choose which super population to use if there is more than one reported"
@@ -266,11 +266,11 @@ learnAboutParameters () {
                 echo "and the order super populations are chosen based on preferred super population"
                 echo "when the preferred super population is not present in the study."
                 echo ""
-                echo -e "   ${GREEN}AFR${NC} - African population " 
-                echo -e "   ${GREEN}AMR${NC} - Ad Mixed American population " 
-                echo -e "   ${GREEN}EAS${NC} - East Asian population " 
-                echo -e "   ${GREEN}EUR${NC} - European population " 
-                echo -e "   ${GREEN}SAS${NC} - South Asian population " 
+                echo -e "   ${GREEN}AFR${NC} - African population "
+                echo -e "   ${GREEN}AMR${NC} - Ad Mixed American population "
+                echo -e "   ${GREEN}EAS${NC} - East Asian population "
+                echo -e "   ${GREEN}EUR${NC} - European population "
+                echo -e "   ${GREEN}SAS${NC} - South Asian population "
                 echo ""
                 echo -e "   ${LIGHTPURPLE}AFR${NC} --> AFR, AMR, SAS, EUR, EAS"
                 echo -e "   ${LIGHTPURPLE}AMR${NC} --> AMR, EUR, SAS, EAS, AFR"
@@ -281,39 +281,39 @@ learnAboutParameters () {
             6 ) echo -e "${MYSTERYCOLOR} -t traitsList: ${NC}"
                 echo "This parameter allows you to pick specifically which traits "
                 echo "you would like to use to calculate PRS scores. You can search available "
-                echo "traits by choosing the search option in the Options Menu " 
-                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID." 
+                echo "traits by choosing the search option in the Options Menu "
+                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID."
                 echo "" ;;
             7 ) echo -e "${MYSTERYCOLOR} -k studyType: ${NC}"
                 echo "This parameter allows you to pick what kind of studies you "
-                echo -e "wish to run the PRS calculator on. The options are ${GREEN}HI${NC} (High Impact), " 
+                echo -e "wish to run the PRS calculator on. The options are ${GREEN}HI${NC} (High Impact), "
                 echo -e "${GREEN}LC${NC} (Largest Cohort), and${GREEN} O${NC} (Other). You can include any combination "
-                echo "of these and we will run calculations on the appropriate studies." 
+                echo "of these and we will run calculations on the appropriate studies."
                 echo ""
-                echo -e "   ${GREEN}HI (High Impact)${NC} - determined by study scores pulled from Almetric. Only " 
+                echo -e "   ${GREEN}HI (High Impact)${NC} - determined by study scores pulled from Almetric. Only "
                 echo "   the studies with the highest impact are chosen with this option. "
-                echo -e "   ${GREEN}LC (Largest Cohort)${NC} - determined by study cohort size. Only the" 
-                echo "   studies with the largest cohort are chosen with this option." 
-                echo -e "   ${GREEN}O (Other)${NC} - studies are those that do not fall under Highest Impact or" 
-                echo "   Largest Cohort. " 
-                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID." 
+                echo -e "   ${GREEN}LC (Largest Cohort)${NC} - determined by study cohort size. Only the"
+                echo "   studies with the largest cohort are chosen with this option."
+                echo -e "   ${GREEN}O (Other)${NC} - studies are those that do not fall under Highest Impact or"
+                echo "   Largest Cohort. "
+                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID."
                 echo "" ;;
             8 ) echo -e "${MYSTERYCOLOR} -i studyIDs: ${NC}"
                 echo "This parameter allows you to pick specifically which studies "
                 echo "you would like to use to calculate PRS scores. You can see available "
                 echo "studies by choosing the search option in the Options Menu. Enter the "
-                echo "GWAS Catalog Study ID of the studies you wish to use. " 
+                echo "GWAS Catalog Study ID of the studies you wish to use. "
                 echo "" ;;
             9 ) echo -e "${MYSTERYCOLOR} -e ethnicity: ${NC}"
                 echo "This parameter allows you to filter studies to use by the ethnicity "
-                echo "of the subjects used in the study. These correspond to those listed " 
+                echo "of the subjects used in the study. These correspond to those listed "
                 echo "by the authors. A list can be printed from the corresponding menu option."
-                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID." 
+                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID."
                 echo "" ;;
             10 ) echo -e "${MYSTERYCOLOR} -y value type: ${NC}"
                 echo "This parameter allows you to filter studies by the value type reported"
-                echo "by the study's authors (beta values or odds ratios)." 
-                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID." 
+                echo "by the study's authors (beta values or odds ratios)."
+                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID."
                 echo "" ;;
             11 ) echo -e "${MYSTERYCOLOR} -v verbose: ${NC}"
                 echo -e "For a more detailed TSV result file, include the ${GREEN}-v${NC} flag."
@@ -328,7 +328,7 @@ learnAboutParameters () {
                 echo "    - variants that are in high linkage disequilibrium whose odds ratios are not included in the calculations"
                 echo ""
                 echo "If the output file is in TSV format and this parameter is not included, the default TSV result"
-                echo "file will include the study ID and the corresponding polygenic risk scores for each sample." 
+                echo "file will include the study ID and the corresponding polygenic risk scores for each sample."
                 echo "If the output file is in JSON format, the results will, by default, be in verbose format."
                 echo -e "${LIGHTRED}**NOTE:${NC} There is no condensed version of JSON output."
                 echo "" ;;
@@ -336,7 +336,7 @@ learnAboutParameters () {
                 echo "A rare handful of studies report beta values or odds ratios dependent on biological sex."
                 echo "Users can filter studies that contain these associations by selecting either male (M) or female (F)."
                 echo "To exclude studies that contain values associated with sex, users can use exclude (e)."
-                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID." 
+                echo -e "${LIGHTRED}**NOTE:${NC} This does not affect studies selected by studyID."
                 echo "" ;;
             13 ) echo -e "${MYSTERYCOLOR} -s stepNumber: ${NC}"
                 echo -e "Either ${GREEN}-s 1${NC} or ${GREEN}-s 2${NC}"
@@ -355,17 +355,17 @@ learnAboutParameters () {
                 echo "option from the main menu."
                 echo "" ;;
             16 ) echo -e "${MYSTERYCOLOR} -a reference genome of user GWAS data: ${NC}"
-                echo "This parameter tells us which reference genome was used to identify the variants " 
+                echo "This parameter tells us which reference genome was used to identify the variants "
                 echo -e "in the GWAS data file. Available options are ${GREEN}hg17${NC}, ${GREEN}hg18${NC}, ${GREEN}hg19${NC}, and ${GREEN}hg38${NC}."
                 echo "If a GWAS data file is specified without this reference genome being specified, we assume the"
                 echo "reference genome is the same as the one for the input VCF or TXT."
                 echo "" ;;
             17 ) echo -e "${MYSTERYCOLOR} -b beta values used for user supplied GWAS data: ${NC}"
-                echo "This flag indicates that beta coefficents were used in the user supplied GWAS data" 
+                echo "This flag indicates that beta coefficents were used in the user supplied GWAS data"
                 echo "file instead of odds ratios."
                 echo "" ;;
             18 ) echo -e "${MYSTERYCOLOR} -q minor allele frequency cohort: ${NC}"
-                echo "This parameter allows the user to select the cohort to use for minor allele frequencies and " 
+                echo "This parameter allows the user to select the cohort to use for minor allele frequencies and "
                 echo "also indicates the cohort to use for reporting percentile rank. Available options are:"
                 echo -e "${GREEN}ukbb${NC} (UK Biobank, default)"
                 echo -e "${GREEN}adni-ad${NC} (ADNI Alzheimer's disease)"
@@ -397,7 +397,7 @@ learnAboutParameters () {
                 echo "This type of LD clumping is beneficial because it allows for sample-wide PRS comparisons"
                 echo "since each risk score is calculated using the same variants."
                 echo "In contrast, individual-wide LD clumping determines the variants to be used in the PRS calculation"
-                echo "by only looking at the individual's variants that have a corresponding risk allele" 
+                echo "by only looking at the individual's variants that have a corresponding risk allele"
                 echo  "(or, in the absence of a risk allele, an imputed unknown allele) in the GWA study."
                 echo "The benefit to this type of LD clumping is that it allows for a greater number of risk alleles"
                 echo "to be included in each individual's polygenic risk score."
@@ -415,7 +415,7 @@ learnAboutParameters () {
             # ask if the user wants to look at more of the params
             read -p "Return to Parameters? (y/n) " returnToParams
             echo ""
-            case $returnToParams in 
+            case $returnToParams in
                 [yY]* ) ;;
                 * ) cont=0;;
             esac
@@ -433,19 +433,19 @@ searchTraitsAndStudies () {
     backslash='\'
     NEWLINE='\n'
 
-    case $option in 
-        [sS]* ) read -p "Enter the search term you wish to use: " searchTerm 
+    case $option in
+        [sS]* ) read -p "Enter the search term you wish to use: " searchTerm
                 if [[ "$searchTerm" = *"'"* ]]; then
                     searchTerm=${searchTerm//${sub}/${backslash}${sub}}
                 fi
-                echo "" 
+                echo ""
                 echo -e "${LIGHTPURPLE}First Author and Year | GWAS Catalog Study ID | Reported Trait | Trait | Original Value Type | Title${NC}"
                 if curl -s https://prs.byu.edu/find_studies/${searchTerm} | jq -r 'sort_by(.citation) | .[] | .citation + " | " + .studyID + " | " + .reportedTrait + " | " + .trait + " | " + .ogValueTypes + " | " + .title + "\n"'; then
                     echo ""
-                else 
+                else
                     jqError "STUDIES"
                 fi;;
-        [tT]* ) read -p "Enter the search term you wish to use: " searchTerm 
+        [tT]* ) read -p "Enter the search term you wish to use: " searchTerm
                 if [[ "$searchTerm" = *"'"* ]]; then
                     searchTerm=${searchTerm//${sub}/${backslash}${sub}}
                 fi
@@ -489,7 +489,7 @@ present in the file. Required and optional header names must be exact. Note that
 are present, then the calculator will separate calculations by those columns. If you do not wish for this to \
 happen, do not include those optional columns."
     echo ""
-    echo "If more than one odds ratio exists for an RsID in a study/trait combination, the program will notify the user and stop running. \ 
+    echo "If more than one odds ratio exists for an RsID in a study/trait combination, the program will notify the user and stop running. \
 To avoid this, please ensure that you do not have any duplicated snps."
     echo ""
     echo -e "${LIGHTRED}NOTE: If a GWAS data file is specified, risk scores will only be calculated on \
@@ -501,9 +501,9 @@ ${MYSTERYCOLOR}-y${LIGHTRED}, and ${MYSTERYCOLOR}-g${LIGHTRED} will be ignored.$
     echo ""
 
     cont=1
-    
+
     while [[ "$cont" != "0" ]]
-    do 
+    do
         echo    " _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ "
         echo    "|                              |"
         echo -e "|${LIGHTPURPLE}REQUIRED COLUMNS: ${NC}            |"
@@ -532,14 +532,14 @@ ${MYSTERYCOLOR}-y${LIGHTRED}, and ${MYSTERYCOLOR}-g${LIGHTRED} will be ignored.$
         read -p "#? " option
         echo ""
 
-        case $option in 
-            1 ) echo -e "${MYSTERYCOLOR} Study ID: ${NC}" 
+        case $option in
+            1 ) echo -e "${MYSTERYCOLOR} Study ID: ${NC}"
                 echo "A unique study identifier. In our database, we use GWAS Catalog study identifiers. As long as this is unique for each study, it can be whatever you want."
                 echo "" ;;
-            2 ) echo -e "${MYSTERYCOLOR} Trait: ${NC}" 
+            2 ) echo -e "${MYSTERYCOLOR} Trait: ${NC}"
                 echo "The Experimental Factor Ontology (EFO) trait the GWAS deals with."
                 echo "" ;;
-            3 ) echo -e "${MYSTERYCOLOR} Super Population: ${NC}" 
+            3 ) echo -e "${MYSTERYCOLOR} Super Population: ${NC}"
                 echo "The super population from the 1000 Genomes most closely associated with the GWAS data. This super population will be used for LD calculations."
                 echo "" ;;
             3 ) echo -e "${MYSTERYCOLOR} RsID: ${NC}"
@@ -587,12 +587,12 @@ ${MYSTERYCOLOR}-y${LIGHTRED}, and ${MYSTERYCOLOR}-g${LIGHTRED} will be ignored.$
         if [[ "$cont" != "0" ]]; then
             read -p "Return to GWAS Columns? (y/n) " returnToParams
             echo ""
-            case $returnToParams in 
+            case $returnToParams in
                 [yY]* ) ;;
                 * ) cont=0;;
             esac
         fi
-    done 
+    done
 }
 
 jqError () {
@@ -664,11 +664,11 @@ calculatePRS () {
     fi
 
     # create python import paths
-    SCRIPT_DIR="$( cd "$( dirname "$0" )" && pwd )"
+    SCRIPT_DIR="/Users/nader/workspace/helixxy/PolyRiskScore/static/downloadables"
 
     while getopts 'f:o:c:r:p:t:k:i:e:vs:g:n:u:a:by:q:mx:lh:' c "$@"
-    do 
-        case $c in 
+    do
+        case $c in
             f)  if ! [ -z "$filename" ]; then
                     echo "Too many filenames given at once."
                     echo "If you have files split into multiple chromosomes, use Bash expansion"
@@ -686,20 +686,17 @@ calculatePRS () {
                     echo "Check the path and try again."
                     echo -e "${LIGHTRED}Quitting...${NC}"
                     exit 1
-                elif ! [[ $(echo ${files[0]} | tr '[:upper:]' '[:lower:]') =~ .vcf$|.txt$ ]]; then
+                elif ! [[ $(echo ${files[0]} | tr '[:upper:]' '[:lower:]') =~ .vcf$|.bcf$|.txt$ ]]; then
                     # check if the file is a valid zipped file (check getZippedFileExtension for more details)
                     zipExtension=`$pyVer "$SCRIPT_DIR/grep_file.py" "zip" "${files[0]}" "True" "False"`
-                    if [ "$zipExtension" = ".vcf" ] || [ "$zipExtension" = ".txt" ]; then
+                    if [ "$zipExtension" = ".vcf" ] || [ "$zipExtension" = ".bcf" ] || [ "$zipExtension" = ".txt" ]; then
                         echo "zipped file validated"
-                    # if "False", the file is not a zipped file
                     elif [ "$zipExtension" = "False" ]; then
                         echo -e "The file${LIGHTRED} ${files[0]} ${NC}is in the wrong format."
-                        echo -e "Please use a vcf or txt file."
+                        echo -e "Please use a vcf, bcf, or txt file."
                         echo -e "${LIGHTRED}Quitting...${NC}"
                         exit 1
-                    # if something else, the file is a zipped file, but there are too many/few vcf/txt files in it
                     else
-                        # print the error associated with the zipped file and exit
                         echo $zipExtension
                         echo -e "${LIGHTRED}Quitting...${NC}"
                         exit 1
@@ -747,7 +744,7 @@ calculatePRS () {
                     echo -e "${LIGHTRED}Quitting...${NC}"
                     exit 1
                 fi
-                superPop=$(echo "$OPTARG" | tr '[:lower:]' '[:upper:]') 
+                superPop=$(echo "$OPTARG" | tr '[:lower:]' '[:upper:]')
                 if ! [[ "$superPop" =~ ^AFR$|^AMR$|^EAS$|^EUR$|^SAS$ ]]; then
                     echo -e "${LIGHTRED}$superPop ${NC}should be AFR, AMR, EAS, EUR, or SAS."
                     echo "Check the value and try again."
@@ -759,7 +756,7 @@ calculatePRS () {
                 trait="${trait//$single/$escaped}" # replace single quotes with escaped single quotes
                 trait="${trait//$space/$underscore}"    # replace spaces with underscores
                 trait="${trait//$quote/$empty}" # replace double quotes with nothing
-                traitsForCalc+=("$trait");; 
+                traitsForCalc+=("$trait");;
             k)  studyType=$(echo "$OPTARG" | tr '[:upper:]' '[:lower:]')
                 if [ $studyType != "hi" ] && [ $studyType != "lc" ] && [ $studyType != "o" ]; then
                     echo "INVALID STUDY TYPE ARGUMENT. To filter by study type,"
@@ -787,27 +784,27 @@ calculatePRS () {
                         sexForCalc+=("exclude")
                     fi
                 fi;;
-            s)  if ! [ -z "$step" ]; then 
+            s)  if ! [ -z "$step" ]; then
                     echo "Too many steps requested at once."
                     echo -e "${LIGHTRED}Quitting...${NC}"
                     exit 1
                 fi
                 step=$OPTARG
                 # if is not a number, or if it is a number less than 1 or greater than 2
-                if (! [[ $step =~ ^[0-9]+$ ]]) || ([[ $step =~ ^[0-9]+$ ]] && ([[ $step -gt 2 ]] || [[ $step -lt 1 ]])); then 
+                if (! [[ $step =~ ^[0-9]+$ ]]) || ([[ $step =~ ^[0-9]+$ ]] && ([[ $step -gt 2 ]] || [[ $step -lt 1 ]])); then
                     echo -e "${LIGHTRED}$step ${NC}is not a valid step number input"
                     echo "Valid step numbers are 1 and 2"
                     echo -e "${LIGHTRED}Quitting...${NC}"
                     exit 1
                 fi;;
-            n)  if ! [ -z "$processes" ]; then 
+            n)  if ! [ -z "$processes" ]; then
                     echo "Too many subprocess arguments requested at once."
                     echo -e "${LIGHTRED}Quitting...${NC}"
                     exit 1
                 fi
                 processes=$OPTARG
                 # if is not a number, or if it is a number less than 1
-                if (! [[ $processes =~ ^[0-9]+$ ]]) || ([[ $processes =~ ^[0-9]+$ ]] && [[ $processes -lt 0 ]]); then 
+                if (! [[ $processes =~ ^[0-9]+$ ]]) || ([[ $processes =~ ^[0-9]+$ ]] && [[ $processes -lt 0 ]]); then
                     echo -e "${LIGHTRED}$processes ${NC}is not a valid input for the number of subprocesses"
                     echo "The number of subprocesses cannot be less than 0"
                     echo -e "${LIGHTRED}Quitting...${NC}"
@@ -977,13 +974,13 @@ calculatePRS () {
     fi
     requiredParamsHash=$(cksum <<< "${files}${output}${cutoff}${refgen}${superPop}" | cut -f 1 -d ' ')
     # Create uniq ID for filtered file path
-    TIMESTAMP=`date "+%Y-%m-%d_%H-%M-%S-%3N"` 
-    
+    TIMESTAMP=`date "+%Y-%m-%d_%H-%M-%S-%3N"`
+
     # if zipExtension hasn't been instantiated yet, initialize it
     if [ -z "$zipExtension" ]; then
         zipExtension="NULL"
     fi
-    # if the zip extension is valid, set extension to the zip extension, 
+    # if the zip extension is valid, set extension to the zip extension,
     # otherwise use python os.path.splitext to get the extension
     if [ $zipExtension = ".vcf" ] || [ $zipExtension = ".txt" ]; then
         extension="$zipExtension"
@@ -996,7 +993,7 @@ calculatePRS () {
         if [ -z "$GWASzipExtension" ]; then
             GWASzipExtension="NULL"
         fi
-        # if the zip extension is valid, set extension to the zip extension, 
+        # if the zip extension is valid, set extension to the zip extension,
         # otherwise use python os.path.splitext to get the extension
         if [ $GWASzipExtension = ".tsv" ] || [ $GWASzipExtension = ".txt" ]; then
             GWASextension="$GWASzipExtension"
@@ -1092,7 +1089,7 @@ calculatePRS () {
                     exit 1
                 }
             }
-        
+
             echo "Checking for biopython package requirement"
             {
                 $pyVer -c "import Bio" >/dev/null 2>&1
@@ -1149,7 +1146,7 @@ calculatePRS () {
         checkForNewVersion
         echo "Running PRSKB on ${files[@]}"
 
-        if ! [ -z "${GWASfilename}" ]; then 
+        if ! [ -z "${GWASfilename}" ]; then
             # Calls a python function to format the given GWAS data and get the clumps from our database
             # saves both to files
             # GWAS data --> GWASassociations_{fileHash}.txt
@@ -1160,7 +1157,7 @@ calculatePRS () {
                 echo -e "${LIGHTRED}AN ERROR HAS CAUSED THE TOOL TO EXIT... Quitting${NC}"
                 exit;
             fi
-        else 
+        else
             # Calls a python function to get a list of SNPs and clumps from our Database
             # saves them to files
             # associations --> either allAssociations.txt OR associations_{fileHash}.txt
@@ -1182,7 +1179,7 @@ calculatePRS () {
 
         echo "Calculating prs on ${files[@]}"
         FILE="${SCRIPT_DIR}/.workingFiles/associations_${fileHash}.txt"
-        if ! [ -z "${GWASfilename}" ]; then 
+        if ! [ -z "${GWASfilename}" ]; then
             FILE="${SCRIPT_DIR}/.workingFiles/GWASassociations_${fileHash}.txt"
         fi
 
@@ -1194,7 +1191,7 @@ calculatePRS () {
                 echo "Parsed through genotype information"
                 echo "Calculated score"
             else
-                echo -e "${LIGHTRED}ERROR DURING CALCULATION... Quitting${NC}" 
+                echo -e "${LIGHTRED}ERROR DURING CALCULATION... Quitting${NC}"
             fi
         else
             echo -e "${LIGHTRED}ERROR DURING CREATION OF FILTERED INPUT FILE... Quitting${NC}"
@@ -1207,10 +1204,10 @@ calculatePRS () {
             rm "${SCRIPT_DIR}/.workingFiles/traitStudyIDToSnps_${fileHash}.txt"
         fi
 
-        [ -e "${SCRIPT_DIR}/.workingFiles/clumpNumDict_${refgen}_${fileHash}.txt" ] && rm "${SCRIPT_DIR}/.workingFiles/clumpNumDict_${refgen}_${fileHash}.txt" 
+        [ -e "${SCRIPT_DIR}/.workingFiles/clumpNumDict_${refgen}_${fileHash}.txt" ] && rm "${SCRIPT_DIR}/.workingFiles/clumpNumDict_${refgen}_${fileHash}.txt"
         [ -e "${SCRIPT_DIR}/.workingFiles/filteredStudySnps_${fileHash}_${TIMESTAMP}.txt" ] && rm -- "${SCRIPT_DIR}/.workingFiles/filteredStudySnps_${fileHash}_${TIMESTAMP}.txt"
         [ -e "${SCRIPT_DIR}/.workingFiles/filteredInput_${fileHash}_${TIMESTAMP}${extension}" ] && rm -- "${SCRIPT_DIR}/.workingFiles/filteredInput_${fileHash}_${TIMESTAMP}${extension}"
-        
+
         [ -d "${SCRIPT_DIR}/__pycache__" ] && rm -r "${SCRIPT_DIR}/__pycache__"
         [ -e "${SCRIPT_DIR}/$output.lock" ] && rm -- "${SCRIPT_DIR}/$output.lock"
         echo "Cleaned up intermediate files"
@@ -1221,18 +1218,18 @@ calculatePRS () {
 
 checkForNewVersion () {
     newestVersion=$(curl -s "https://prs.byu.edu/cli_version") # checks the version on the
-    
+
     # asks user if they want to download the newest version
     if [ "$newestVersion" != "" ] && [[ "$newestVersion" =~ ^[0-9]*(\.[0-9]+)?(\.[0-9]+)?$ ]] && [ "$newestVersion" != "$version" ]; then
         echo "There is a newer version available. Download new version? (y/n)"
         read -p "(y/n)? " decision
 
-        case $decision in 
+        case $decision in
             [yY]* ) curl -s "https://prs.byu.edu/download_cli" -o "PrskbCLITool.zip"
                     echo ""
                     echo 'A zip file containing the updated scripts has been downloaded.'
                     echo 'Go ahead and delete the old files, extract the new ones, and run the program.'
-                    # todo - make this replace the files 
+                    # todo - make this replace the files
                     exit;;
             [nN]* ) ;;
             * ) echo -e "Invalid option. ${LIGHTRED}New version will not be downloaded${NC}";;
@@ -1247,7 +1244,7 @@ askToStartMenu() {
     read -p "(u/m)? " decision
     echo ""
 
-    case $decision in 
+    case $decision in
         [uU]* ) usage
                 exit;;
         [mM]* ) prskbMenu
@@ -1260,11 +1257,11 @@ askToStartMenu() {
 # BEGINNING OF 'MAIN' FUNCTIONALITY
 
 # check to see if they want the version
-if [[ "$1" =~ "--version" ]] || [[ "$1" =~ "-v" ]] && [[ -z $2 ]]; then 
+if [[ "$1" =~ "--version" ]] || [[ "$1" =~ "-v" ]] && [[ -z $2 ]]; then
     echo -e "Running version ${version}"
     checkForNewVersion
     exit 1
 fi
 
 # pass arguments to calculatePRS
-calculatePRS "$@" 
+calculatePRS "$@"
