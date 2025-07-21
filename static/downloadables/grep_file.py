@@ -102,10 +102,18 @@ def getFilesAndPaths(fileHash, requiredParamsHash, superPop, refGen, isRSids, ti
             isFilters=True
             associationsPath = os.path.join(basePath, "GWASassociations_{bhash}.txt".format(bhash = fileHash))
             studySnpsPath = os.path.join(basePath, "traitStudyIDToSnps_{ahash}.txt".format(ahash=fileHash))
+            print(f"[LOG] GWAS mode - looking for files with fileHash {fileHash}")
         else:
             associFileName = "allAssociations_{refGen}.txt".format(refGen=refGen)
             associationsPath = os.path.join(basePath, associFileName)
             studySnpsPath = os.path.join(basePath, "traitStudyIDToSnps.txt")
+            print(f"[LOG] Database mode - looking for standard files")
+        
+        print(f"[LOG] Expected associations file: {associationsPath}")
+        print(f"[LOG] Expected studySnps file: {studySnpsPath}")
+        print(f"[LOG] Checking if files exist...")
+        print(f"[LOG]   Associations exists: {os.path.exists(associationsPath)}")
+        print(f"[LOG]   StudySnps exists: {os.path.exists(studySnpsPath)}")
         # write the files
         with open(associationsPath, 'r') as tableObjFile:
             tableObjDict = json.load(tableObjFile)
@@ -122,8 +130,18 @@ def getFilesAndPaths(fileHash, requiredParamsHash, superPop, refGen, isRSids, ti
 
         # loop through each population and get the corresponding clumps file
         allClumps = {}
+        print(f"[LOG] Loading clumps for populations: {allSuperPops}")
         for pop in allSuperPops:
-            clumpsPath = os.path.join(basePath, "{p}_clumps_{r}.txt".format(p = pop, r = refGen))
+            if useGWASupload:
+                # For GWAS uploads, include fileHash in filename
+                clumpsPath = os.path.join(basePath, "{p}_clumps_{r}_{ahash}.txt".format(p = pop, r = refGen, ahash = fileHash))
+            else:
+                # For regular database queries, no fileHash
+                clumpsPath = os.path.join(basePath, "{p}_clumps_{r}.txt".format(p = pop, r = refGen))
+            
+            print(f"[LOG] Expected clumps file for {pop}: {clumpsPath}")
+            print(f"[LOG]   Clumps file exists: {os.path.exists(clumpsPath)}")
+            
             with open(clumpsPath, 'r') as clumpsObjFile:
                 clumpsObjDict = json.load(clumpsObjFile)
                 allClumps[pop] = clumpsObjDict

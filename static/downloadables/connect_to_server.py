@@ -5,6 +5,7 @@ import os
 import os.path
 import time
 import datetime
+import hashlib
 from sys import argv
 from io import TextIOWrapper
 import zipfile
@@ -33,6 +34,13 @@ def get_server_last_update_or_none(url, params):
 # get the associations and clumps from the Server
 def retrieveAssociationsAndClumps(refGen, traits, studyTypes, studyIDs, ethnicity, valueTypes, sexes, superPop, fileHash, extension, mafCohort):
     checkInternetConnection()
+    
+    # Clean up old cache files on startup
+    cleanup_cache()
+    
+    # Show cache statistics
+    cache_stats = get_cache_stats()
+    print(f"[LOG] Cache stats - POST: {cache_stats['post_cache']} files, GET: {cache_stats['get_cache']} files, Total: {cache_stats['total_size_mb']:.2f} MB")
 
     # if the extension is .txt and the mafCohort is user -- Fail this is not a valid combination
     if extension == '.txt' and mafCohort == 'user':
@@ -125,7 +133,23 @@ def retrieveAssociationsAndClumps(refGen, traits, studyTypes, studyIDs, ethnicit
 
 # format the uploaded GWAS data and get the clumps from the server
 def formatGWASAndRetrieveClumps(GWASfile, userGwasBeta, GWASextension, GWASrefGen, refGen, superPop, mafCohort, fileHash, extension):
+    print(f"[LOG] Starting formatGWASAndRetrieveClumps with:")
+    print(f"[LOG]   GWASfile: {GWASfile}")
+    print(f"[LOG]   userGwasBeta: {userGwasBeta}")
+    print(f"[LOG]   GWASrefGen: {GWASrefGen}, refGen: {refGen}")
+    print(f"[LOG]   superPop: {superPop}")
+    print(f"[LOG]   mafCohort: {mafCohort}")
+    print(f"[LOG]   fileHash: {fileHash}")
+    print(f"[LOG]   extension: {extension}")
+    
     checkInternetConnection()
+    
+    # Clean up old cache files on startup
+    cleanup_cache()
+    
+    # Show cache statistics
+    cache_stats = get_cache_stats()
+    print(f"[LOG] Cache stats - POST: {cache_stats['post_cache']} files, GET: {cache_stats['get_cache']} files, Total: {cache_stats['total_size_mb']:.2f} MB")
 
     # if the extension is .txt and the mafCohort is user -- Fail this is not a valid combination
     if extension == '.txt' and mafCohort == 'user':
@@ -273,29 +297,51 @@ def formatGWASAndRetrieveClumps(GWASfile, userGwasBeta, GWASextension, GWASrefGe
             studySnpsData[traitStudyIDPValAnno].append(line[si])
 
     GWASfileOpen.close()
+    
+    print(f"[LOG] GWAS file parsing completed:")
+    print(f"[LOG]   Parsed {len(associationDict)} SNPs from GWAS file")
+    print(f"[LOG]   Found {len(studyIDsToMetaData)} unique studies")
+    print(f"[LOG]   Found {len(studySnpsData)} trait/study combinations")
+    print(f"[LOG]   Identified {len(allSuperPops)} super populations: {allSuperPops}")
 
     # remove duplicated associations
+    duplicates_removed = len(duplicatesSet)
     for (snp, trait, studyID) in duplicatesSet:
         del associationDict[snp]["traits"][trait][studyID]
         if associationDict[snp]["traits"][trait] == {}:
             del associationDict[snp]["traits"][trait]
             if associationDict[snp]["traits"] == {}:
                 del associationDict[snp]
+    
+    if duplicates_removed > 0:
+        print(f"[LOG] Removed {duplicates_removed} duplicate associations")
 
     # if the samples reference genome does not equal the gwas reference genome, get a dictionary with the correct positions
+    chromSnpDict = {}
     if GWASrefGen != refGen:
+        print(f"[LOG] Converting SNP positions from {GWASrefGen} to {refGen}")
         snps = list(associationDict.keys())
-        chromSnpDict = getUrlWithParams("https://prs.byu.edu/snps_to_chrom_pos", { "snps": snps, "refGen": refGen })
+        
+        # Use retry logic for SNP position conversion
+        chromSnpDict = retry_network_call(
+            getUrlWithParams,
+            "https://prs.byu.edu/snps_to_chrom_pos", 
+            { "snps": snps, "refGen": refGen }
+        )
+        print(f"[LOG] Got position mappings for {len(chromSnpDict)} chromosome positions")
 
     mergedAssociDict = dict()
     mergedAssociDict.update(associationDict)
     mergedAssociDict.update(chromSnpDict)
     chromPos = list(chromSnpDict.keys())
+    print(f"[LOG] Created merged associations dict with {len(mergedAssociDict)} entries")
+    print(f"[LOG] chromPos contains {len(chromPos)} chromosome positions")
 
     associationsReturnObj = {
         "associations": mergedAssociDict,
         "studyIDsToMetaData": studyIDsToMetaData
     }
+    print(f"[LOG] Created associationsReturnObj with {len(associationsReturnObj['associations'])} associations")
         
     workingFilesPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".workingFiles")
     # if the directory doesn't exist, make it, and we will need to download the files
@@ -307,56 +353,158 @@ def formatGWASAndRetrieveClumps(GWASfile, userGwasBeta, GWASextension, GWASrefGe
 
 
     # Access and write the clumps file for each of the super populations preferred in the GWAS file
+    print(f"[LOG] Processing clumps for {len(allSuperPops)} super populations: {allSuperPops}")
+    clumps_written = 0
     for pop in allSuperPops:
         fileName = "{pop}_clumps_{refGen}_{fileHash}.txt".format(pop=pop, refGen=refGen, fileHash=fileHash)
         clumpsPath = os.path.join(workingFilesPath, fileName)
+        print(f"[LOG] Getting clumps data for population {pop}")
 
-        # get clumps using the refGen and superpopulation
-        clumpsData = getClumps(refGen, pop, chromPos)
+        try:
+            # get clumps using the refGen and superpopulation
+            clumpsData = getClumps(refGen, pop, chromPos)
 
-        # check to see if clumpsData is instantiated in the local variables
-        if 'clumpsData' in locals():
-            f = open(clumpsPath, 'w', encoding="utf-8")
-            f.write(json.dumps(clumpsData))
-            f.close()
+            # Validate clumpsData before writing
+            if clumpsData is None:
+                print(f"[ERROR] clumpsData is None for population {pop}")
+                continue
+            elif not clumpsData:
+                print(f"[WARN] clumpsData is empty for population {pop}")
+            else:
+                print(f"[LOG] Retrieved {len(clumpsData)} clump entries for population {pop}")
+
+            # Write clumps file with proper error handling
+            try:
+                with open(clumpsPath, 'w', encoding="utf-8") as f:
+                    f.write(json.dumps(clumpsData))
+                print(f"[LOG] Successfully wrote clumps file: {clumpsPath}")
+                
+                # Verify file was written correctly
+                if os.path.exists(clumpsPath) and os.path.getsize(clumpsPath) > 0:
+                    clumps_written += 1
+                    print(f"[LOG] Verified clumps file exists and has size: {os.path.getsize(clumpsPath)} bytes")
+                else:
+                    print(f"[ERROR] Clumps file validation failed: {clumpsPath}")
+                    
+            except Exception as e:
+                print(f"[ERROR] Failed to write clumps file {clumpsPath}: {e}")
+                
+        except Exception as e:
+            print(f"[ERROR] Failed to get clumps data for population {pop}: {e}")
+    
+    print(f"[LOG] Successfully wrote {clumps_written}/{len(allSuperPops)} clumps files")
 
     #get maf data using the refgen and mafcohort
     fileName = "{m}_maf_{ahash}.txt".format(m=mafCohort, ahash=fileHash)
     mafPath = os.path.join(workingFilesPath, fileName)
-    mafData = getMaf(mafCohort, refGen, chromPos)
+    print(f"[LOG] Getting MAF data for cohort {mafCohort}")
+    
+    try:
+        mafData = getMaf(mafCohort, refGen, chromPos)
+        if mafData is None:
+            print(f"[ERROR] mafData is None for cohort {mafCohort}")
+        elif not mafData:
+            print(f"[WARN] mafData is empty for cohort {mafCohort}")
+        else:
+            print(f"[LOG] Retrieved {len(mafData)} MAF entries for cohort {mafCohort}")
+    except Exception as e:
+        print(f"[ERROR] Failed to get MAF data for cohort {mafCohort}: {e}")
+        mafData = None
 
     # get the study:snps info
     fileName = "traitStudyIDToSnps_{ahash}.txt".format(ahash = fileHash)
     studySnpsPath = os.path.join(workingFilesPath, fileName)
+    print(f"[LOG] StudySnps data contains {len(studySnpsData)} trait/study combinations")
 
     # get the possible alleles for snps
     fileName = "possibleAlleles_{ahash}.txt".format(ahash = fileHash)
     possibleAllelesPath = os.path.join(workingFilesPath, fileName)
-    possibleAllelesData = getPossibleAlleles(list(associationsReturnObj['associations'].keys()))
+    print(f"[LOG] Getting possible alleles for {len(associationsReturnObj['associations'])} SNPs")
+    
+    try:
+        possibleAllelesData = getPossibleAlleles(list(associationsReturnObj['associations'].keys()))
+        if possibleAllelesData is None:
+            print(f"[ERROR] possibleAllelesData is None")
+        elif not possibleAllelesData:
+            print(f"[WARN] possibleAllelesData is empty")
+        else:
+            print(f"[LOG] Retrieved possible alleles for {len(possibleAllelesData)} SNPs")
+    except Exception as e:
+        print(f"[ERROR] Failed to get possible alleles data: {e}")
+        possibleAllelesData = None
 
 
-    # check to see if associationsReturnObj is instantiated in the local variables
-    if 'associationsReturnObj' in locals():
-        f = open(associationsPath, 'w', encoding="utf-8")
-        f.write(json.dumps(associationsReturnObj))
-        f.close()
+    # Write associations file with validation
+    print(f"[LOG] Writing associations file: {associationsPath}")
+    try:
+        if associationsReturnObj and 'associations' in associationsReturnObj and 'studyIDsToMetaData' in associationsReturnObj:
+            associations_count = len(associationsReturnObj['associations'])
+            studies_count = len(associationsReturnObj['studyIDsToMetaData'])
+            print(f"[LOG] AssociationsReturnObj contains {associations_count} associations and {studies_count} studies")
+            
+            with open(associationsPath, 'w', encoding="utf-8") as f:
+                f.write(json.dumps(associationsReturnObj))
+            
+            # Verify file was written correctly
+            if os.path.exists(associationsPath) and os.path.getsize(associationsPath) > 0:
+                print(f"[LOG] Successfully wrote associations file: {associationsPath} (size: {os.path.getsize(associationsPath)} bytes)")
+            else:
+                raise Exception("Associations file validation failed")
+        else:
+            raise Exception("associationsReturnObj is invalid or missing required keys")
+    except Exception as e:
+        print(f"[ERROR] Failed to write associations file {associationsPath}: {e}")
+        raise SystemExit(f"CRITICAL ERROR: Could not write associations file: {e}")
 
-    if 'mafData' in locals():
-        f = open(mafPath, 'w', encoding='utf-8')
-        f.write(json.dumps(mafData))
-        f.close()
+    # Write MAF file with validation
+    if mafData is not None:
+        print(f"[LOG] Writing MAF file: {mafPath}")
+        try:
+            with open(mafPath, 'w', encoding='utf-8') as f:
+                f.write(json.dumps(mafData))
+            
+            if os.path.exists(mafPath) and os.path.getsize(mafPath) > 0:
+                print(f"[LOG] Successfully wrote MAF file: {mafPath} (size: {os.path.getsize(mafPath)} bytes)")
+            else:
+                print(f"[WARN] MAF file validation failed: {mafPath}")
+        except Exception as e:
+            print(f"[ERROR] Failed to write MAF file {mafPath}: {e}")
 
-    # check to see if studySnpsDat is instantiated in the local variables
-    if 'studySnpsData' in locals():
-        f = open(studySnpsPath, 'w', encoding="utf-8")
-        f.write(json.dumps(studySnpsData))
-        f.close()
+    # Write studySnps file with validation  
+    print(f"[LOG] Writing studySnps file: {studySnpsPath}")
+    try:
+        if studySnpsData and len(studySnpsData) > 0:
+            print(f"[LOG] StudySnpsData contains {len(studySnpsData)} entries")
+            
+            with open(studySnpsPath, 'w', encoding="utf-8") as f:
+                f.write(json.dumps(studySnpsData))
+            
+            # Verify file was written correctly
+            if os.path.exists(studySnpsPath) and os.path.getsize(studySnpsPath) > 0:
+                print(f"[LOG] Successfully wrote studySnps file: {studySnpsPath} (size: {os.path.getsize(studySnpsPath)} bytes)")
+            else:
+                raise Exception("StudySnps file validation failed")
+        else:
+            raise Exception("studySnpsData is empty or None")
+    except Exception as e:
+        print(f"[ERROR] Failed to write studySnps file {studySnpsPath}: {e}")
+        raise SystemExit(f"CRITICAL ERROR: Could not write studySnps file: {e}")
 
-    # check to se if possible allele data is instantiated in the loacl variables
-    if 'possibleAllelesData' in locals():
-        f = open(possibleAllelesPath, 'w', encoding="utf-8")
-        f.write(json.dumps(possibleAllelesData))
-        f.close()
+    # Write possible alleles file with validation
+    if possibleAllelesData is not None:
+        print(f"[LOG] Writing possible alleles file: {possibleAllelesPath}")
+        try:
+            with open(possibleAllelesPath, 'w', encoding="utf-8") as f:
+                f.write(json.dumps(possibleAllelesData))
+            
+            if os.path.exists(possibleAllelesPath) and os.path.getsize(possibleAllelesPath) > 0:
+                print(f"[LOG] Successfully wrote possible alleles file: {possibleAllelesPath} (size: {os.path.getsize(possibleAllelesPath)} bytes)")
+            else:
+                print(f"[WARN] Possible alleles file validation failed: {possibleAllelesPath}")
+        except Exception as e:
+            print(f"[ERROR] Failed to write possible alleles file {possibleAllelesPath}: {e}")
+    
+    print(f"[LOG] Completed writing all required files for fileHash {fileHash}")
 
     return
 
@@ -719,9 +867,39 @@ def getVariantAlleles(rsID, mv):
     return list(alleles)
 
 
-# for POST urls
-def postUrlWithBody(url, body):
+# for POST urls with caching
+def postUrlWithBody(url, body, max_age_hours=24):
     import json
+    
+    # Create cache directory if it doesn't exist
+    workingFilesPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".workingFiles")
+    if not os.path.exists(workingFilesPath):
+        os.mkdir(workingFilesPath)
+    
+    cacheDir = os.path.join(workingFilesPath, "post_cache")
+    if not os.path.exists(cacheDir):
+        os.mkdir(cacheDir)
+    
+    # Create cache key from URL and body
+    cache_content = f"{url}|{json.dumps(body, sort_keys=True, ensure_ascii=False)}"
+    cache_key = hashlib.md5(cache_content.encode('utf-8')).hexdigest()
+    cache_file = os.path.join(cacheDir, f"post_{cache_key}.json")
+    
+    # Check if cache exists and is fresh
+    if os.path.exists(cache_file):
+        file_mod_time = os.path.getmtime(cache_file)
+        file_age_hours = (time.time() - file_mod_time) / 3600
+        
+        if file_age_hours < max_age_hours:
+            print(f"[LOG] Using cached response for POST {url} (age: {file_age_hours:.2f}h)")
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[WARN] Cache file corrupted, will fetch fresh: {e}")
+                # Continue to fetch fresh data if cache is corrupted
+    
+    # Fetch fresh data
     print(f"[LOG] POST URL: {url}")
     print(f"[LOG] POST BODY: {json.dumps(body, ensure_ascii=False)}")
 
@@ -731,23 +909,145 @@ def postUrlWithBody(url, body):
         print("\n*** The connection timed out. If you haven't already, try running the first step with no additional filters, then running the second step with the filters.")
         print("(See the README file for an example -- under Applying Step Numbers)\n")
     assert (response), "Error connecting to the server: {0} - {1}".format(response.status_code, response.reason) 
+    
+    result = {}
     if response.status_code == 204:
-        return {}
-    return response.json() 
+        result = {}
+    else:
+        result = response.json()
+    
+    # Cache the result
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"[LOG] Cached POST response to {cache_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to cache response: {e}")
+    
+    return result 
 
 
 
-# for GET urls
-def getUrlWithParams(url, params):
-    # Monta a URL completa para exibir antes do request
+# for GET urls with caching
+def getUrlWithParams(url, params, max_age_hours=24):
     import urllib.parse
+    import json
+    
+    # Create cache directory if it doesn't exist
+    workingFilesPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".workingFiles")
+    if not os.path.exists(workingFilesPath):
+        os.mkdir(workingFilesPath)
+    
+    cacheDir = os.path.join(workingFilesPath, "get_cache")
+    if not os.path.exists(cacheDir):
+        os.mkdir(cacheDir)
+    
+    # Create cache key from URL and params
     full_url = url + '?' + urllib.parse.urlencode(params, doseq=True)
+    cache_key = hashlib.md5(full_url.encode('utf-8')).hexdigest()
+    cache_file = os.path.join(cacheDir, f"get_{cache_key}.json")
+    
+    # Check if cache exists and is fresh
+    if os.path.exists(cache_file):
+        file_mod_time = os.path.getmtime(cache_file)
+        file_age_hours = (time.time() - file_mod_time) / 3600
+        
+        if file_age_hours < max_age_hours:
+            print(f"[LOG] Using cached response for GET {url} (age: {file_age_hours:.2f}h)")
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[WARN] Cache file corrupted, will fetch fresh: {e}")
+                # Continue to fetch fresh data if cache is corrupted
+    
+    # Fetch fresh data
     print(f"[LOG] GET URL: {full_url}")
 
     response = requests.get(url=url, params=params)
     response.close()
     assert (response), "Error connecting to the server: {0} - {1}".format(response.status_code, response.reason) 
-    return response.json()  
+    
+    result = response.json()
+    
+    # Cache the result
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"[LOG] Cached GET response to {cache_file}")
+    except Exception as e:
+        print(f"[WARN] Failed to cache response: {e}")
+    
+    return result  
+
+
+def retry_network_call(func, *args, max_retries=3, **kwargs):
+    """
+    Retry wrapper for network calls with exponential backoff
+    """
+    import time
+    
+    for attempt in range(max_retries):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                print(f"[WARN] Network call failed (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"[LOG] Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+            else:
+                print(f"[ERROR] Network call failed after {max_retries} attempts: {e}")
+                raise
+
+
+def cleanup_cache(max_age_days=7):
+    """
+    Clean up old cache files to prevent disk space issues.
+    Removes cache files older than max_age_days.
+    """
+    workingFilesPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".workingFiles")
+    
+    for cache_type in ["post_cache", "get_cache"]:
+        cache_dir = os.path.join(workingFilesPath, cache_type)
+        if not os.path.exists(cache_dir):
+            continue
+            
+        try:
+            for filename in os.listdir(cache_dir):
+                file_path = os.path.join(cache_dir, filename)
+                if os.path.isfile(file_path):
+                    file_age_days = (time.time() - os.path.getmtime(file_path)) / 86400
+                    if file_age_days > max_age_days:
+                        os.remove(file_path)
+                        print(f"[LOG] Removed old cache file: {filename} (age: {file_age_days:.1f} days)")
+        except Exception as e:
+            print(f"[WARN] Error cleaning cache directory {cache_type}: {e}")
+
+
+def get_cache_stats():
+    """
+    Get statistics about the cache usage.
+    """
+    workingFilesPath = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".workingFiles")
+    stats = {"post_cache": 0, "get_cache": 0, "total_size_mb": 0}
+    
+    for cache_type in ["post_cache", "get_cache"]:
+        cache_dir = os.path.join(workingFilesPath, cache_type)
+        if os.path.exists(cache_dir):
+            try:
+                files = os.listdir(cache_dir)
+                stats[cache_type] = len(files)
+                
+                for filename in files:
+                    file_path = os.path.join(cache_dir, filename)
+                    if os.path.isfile(file_path):
+                        stats["total_size_mb"] += os.path.getsize(file_path) / (1024 * 1024)
+            except Exception as e:
+                print(f"[WARN] Error reading cache directory {cache_type}: {e}")
+    
+    return stats
 
 
 # get clumps using the refGen and superPop
@@ -773,7 +1073,14 @@ def getClumps(refGen, superPop, snpsFromAssociations):
         for chrom in chromToPosMap:
             print("{0}...".format(chrom), end="", flush=True)
             body['positions'] = chromToPosMap[chrom]
-            clumps = {**postUrlWithBody("https://prs.byu.edu/ld_clumping_by_pos", body), **clumps}
+            
+            # Use retry logic for critical clumping call
+            chrom_clumps = retry_network_call(
+                postUrlWithBody, 
+                "https://prs.byu.edu/ld_clumping_by_pos", 
+                body
+            )
+            clumps = {**chrom_clumps, **clumps}
         print('\n')
     except AssertionError:
         raise SystemExit("ERROR: 504 - Connection to the server timed out")
@@ -807,7 +1114,14 @@ def getMaf(mafCohort, refGen, snpsFromAssociations):
             print("{0}...".format(chrom), end="", flush=True)
             body['chrom'] = chrom
             body['pos'] = chromToPosMap[chrom]
-            maf = {**postUrlWithBody("https://prs.byu.edu/get_maf", body), **maf}
+            
+            # Use retry logic for MAF call
+            chrom_maf = retry_network_call(
+                postUrlWithBody,
+                "https://prs.byu.edu/get_maf", 
+                body
+            )
+            maf = {**chrom_maf, **maf}
         print('\n')
     except AssertionError:
         raise SystemExit("ERROR: 504 - Connection to the server timed out")
