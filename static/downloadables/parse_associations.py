@@ -376,11 +376,43 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
                         cols = shortLine.split('\t')
                         rsID = cols[2]
                         chromPos = str(cols[0]) + ":" + str(cols[1])
-                        if (chromPos in tableObjDict['associations'] and (rsID is None or rsID not in tableObjDict['associations'])):
-                            rsID = tableObjDict['associations'][chromPos]
+                        
+                        # Check if we should use chromPos for matching (when GWAS uses chromPos as identifier)
+                        identifier_to_check = rsID
+                        if chromPos in snpSet:
+                            # If chromPos is in our SNP set, use it as the identifier
+                            identifier_to_check = chromPos
+                        elif rsID is None or rsID == '.' or rsID == '':
+                            # BCF has no rsID (rsID='.'), try position-based matching
+                            # Check if any SNP in our set maps to this position
+                            position_match_found = False
+                            for snp in snpSet:
+                                if snp in tableObjDict.get('associations', {}):
+                                    assoc = tableObjDict['associations'][snp]
+                                    if 'pos' in assoc and assoc['pos']:
+                                        # Convert database position to BCF format for comparison
+                                        db_pos = assoc['pos']
+                                        if ':' in db_pos:
+                                            db_chrom, db_pos_num = db_pos.split(':')
+                                            if not db_chrom.startswith('chr'):
+                                                db_chrom = 'chr' + db_chrom
+                                            db_chrompos = f"{db_chrom}:{db_pos_num}"
+                                            
+                                            if db_chrompos == chromPos:
+                                                identifier_to_check = snp  # Use the rsID from database
+                                                position_match_found = True
+                                                break
+                            
+                            if not position_match_found:
+                                identifier_to_check = chromPos  # Fallback to chromPos
+                        elif (chromPos in tableObjDict['associations'] and rsID not in tableObjDict['associations']):
+                            # Legacy logic for when chromPos maps to rsID
+                            if isinstance(tableObjDict['associations'][chromPos], str):
+                                rsID = tableObjDict['associations'][chromPos]
+                                identifier_to_check = rsID
 
-                        # if the rsid is in the study/trait, write the line to the temp file
-                        if rsID in snpSet:
+                        # if the identifier is in the study/trait, write the line to the temp file
+                        if identifier_to_check in snpSet:
                             w.write(line)
 
     else:
@@ -396,11 +428,43 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
                     cols = shortLine.split('\t')
                     rsID = cols[2]
                     chromPos = str(cols[0]) + ':' + str(cols[1])
-                    if (chromPos in tableObjDict['associations'] and (rsID is None or rsID not in tableObjDict['associations'])):
-                        rsID = tableObjDict['associations'][chromPos]
+                    
+                    # Check if we should use chromPos for matching (when GWAS uses chromPos as identifier)
+                    identifier_to_check = rsID
+                    if chromPos in snpSet:
+                        # If chromPos is in our SNP set, use it as the identifier
+                        identifier_to_check = chromPos
+                    elif rsID is None or rsID == '.' or rsID == '':
+                        # BCF has no rsID (rsID='.'), try position-based matching
+                        # Check if any SNP in our set maps to this position
+                        position_match_found = False
+                        for snp in snpSet:
+                            if snp in tableObjDict.get('associations', {}):
+                                assoc = tableObjDict['associations'][snp]
+                                if 'pos' in assoc and assoc['pos']:
+                                    # Convert database position to BCF format for comparison
+                                    db_pos = assoc['pos']
+                                    if ':' in db_pos:
+                                        db_chrom, db_pos_num = db_pos.split(':')
+                                        if not db_chrom.startswith('chr'):
+                                            db_chrom = 'chr' + db_chrom
+                                        db_chrompos = f"{db_chrom}:{db_pos_num}"
+                                        
+                                        if db_chrompos == chromPos:
+                                            identifier_to_check = snp  # Use the rsID from database
+                                            position_match_found = True
+                                            break
+                        
+                        if not position_match_found:
+                            identifier_to_check = chromPos  # Fallback to chromPos
+                    elif (chromPos in tableObjDict['associations'] and rsID not in tableObjDict['associations']):
+                        # Legacy logic for when chromPos maps to rsID
+                        if isinstance(tableObjDict['associations'][chromPos], str):
+                            rsID = tableObjDict['associations'][chromPos]
+                            identifier_to_check = rsID
 
-                    # if the rsid is in the study/trait, write the line to the memory file
-                    if rsID in snpSet:
+                    # if the identifier is in the study/trait, write the line to the memory file
+                    if identifier_to_check in snpSet:
                         string += line
             useFilePath = StringIO(string)
 
@@ -439,38 +503,70 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
             string_format = str(record.FORMAT)
             rsID = record.ID
             chromPos = str(record.CHROM) + ":" + str(record.POS)
-            if (chromPos in tableObjDict['associations'] and (rsID is None or rsID not in tableObjDict['associations'])):
-                rsID = tableObjDict['associations'][chromPos]
+            
+            # Check if we should use chromPos for matching (when GWAS uses chromPos as identifier)
+            identifier_to_check = rsID
+            if chromPos in snpSet:
+                # If chromPos is in our SNP set, use it as the identifier
+                identifier_to_check = chromPos
+            elif rsID is None or rsID == '.' or rsID == '':
+                # BCF has no rsID (rsID='.'), try position-based matching
+                # Check if any SNP in our set maps to this position
+                position_match_found = False
+                for snp in snpSet:
+                    if snp in tableObjDict.get('associations', {}):
+                        assoc = tableObjDict['associations'][snp]
+                        if 'pos' in assoc and assoc['pos']:
+                            # Convert database position to BCF format for comparison
+                            db_pos = assoc['pos']
+                            if ':' in db_pos:
+                                db_chrom, db_pos_num = db_pos.split(':')
+                                if not db_chrom.startswith('chr'):
+                                    db_chrom = 'chr' + db_chrom
+                                db_chrompos = f"{db_chrom}:{db_pos_num}"
+                                
+                                if db_chrompos == chromPos:
+                                    identifier_to_check = snp  # Use the rsID from database
+                                    position_match_found = True
+                                    break
+                
+                if not position_match_found:
+                    identifier_to_check = chromPos  # Fallback to chromPos
+            elif (chromPos in tableObjDict['associations'] and rsID not in tableObjDict['associations']):
+                # Legacy logic for when chromPos maps to rsID
+                if isinstance(tableObjDict['associations'][chromPos], str):
+                    rsID = tableObjDict['associations'][chromPos]
+                    identifier_to_check = rsID
 
             # check to see if the snp is in this particular trait/study
-            if rsID in snpSet:
-                # this if statement ensures that the trait/study combo actually exists in the tableObjDict for this rsID
+            if identifier_to_check in snpSet:
+                # this if statement ensures that the trait/study combo actually exists in the tableObjDict for this identifier
                 # this is necessary due to excluded snps
-                if trait in tableObjDict['associations'][rsID]['traits'] and study in tableObjDict['associations'][rsID]['traits'][trait] and pValBetaAnnoValType in tableObjDict['associations'][rsID]['traits'][trait][study]:
+                if trait in tableObjDict['associations'][identifier_to_check]['traits'] and study in tableObjDict['associations'][identifier_to_check]['traits'][trait] and pValBetaAnnoValType in tableObjDict['associations'][identifier_to_check]['traits'][trait][study]:
                     ALT = record.ALT
                     REF = record.REF 
 
                     # if we need to create the maf, do it here
                     if createMaf:
                         lineInfo = record.INFO["AF"]
-                        if rsID not in mafDict:
-                            mafDict[rsID] = {
+                        if identifier_to_check not in mafDict:
+                            mafDict[identifier_to_check] = {
                                 "chrom": record.CHROM,
                                 "pos": record.POS,
                                 "alleles": {}
                             }
-                        for i in len(ALT):
+                        for i in range(len(ALT)):
                             allele = str(ALT[i])
-                            if allele not in mafDict[rsID]["alleles"]:
-                                mafDict[rsID]["alleles"][allele] = lineInfo[i]
+                            if allele not in mafDict[identifier_to_check]["alleles"]:
+                                mafDict[identifier_to_check]["alleles"][allele] = lineInfo[i]
 
-                        if REF not in mafDict[rsID]["alleles"]:
-                            mafDict[rsID]["alleles"][REF] = 1 - sum(lineInfo)
+                        if REF not in mafDict[identifier_to_check]["alleles"]:
+                            mafDict[identifier_to_check]["alleles"][REF] = 1 - sum(lineInfo)
 
-                    for riskAllele in tableObjDict['associations'][rsID]['traits'][trait][study][pValBetaAnnoValType]:
+                    for riskAllele in tableObjDict['associations'][identifier_to_check]['traits'][trait][study][pValBetaAnnoValType]:
                         #grab the corresponding pvalue and risk allele
-                        pValue = tableObjDict['associations'][rsID]['traits'][trait][study][pValBetaAnnoValType][riskAllele]['pValue']
-                        mafVal = mafDict[rsID]['alleles'][riskAllele] if rsID in mafDict and riskAllele in mafDict[rsID]["alleles"] else 0
+                        pValue = tableObjDict['associations'][identifier_to_check]['traits'][trait][study][pValBetaAnnoValType][riskAllele]['pValue']
+                        mafVal = mafDict[identifier_to_check]['alleles'][riskAllele] if identifier_to_check in mafDict and riskAllele in mafDict[identifier_to_check]["alleles"] else 0
 
                         # compare the pvalue to the pvalue cutoff
                         if pValue <= p_cutOff and mafVal >= mafCutoff:
@@ -479,10 +575,10 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
                                 sample = call.sample
                                 if sample not in usedSnps:
                                     usedSnps[sample] = set()
-                                usedSnps[sample].add(rsID)
+                                usedSnps[sample].add(identifier_to_check)
                                 genotype = record.genotype(sample)['GT']
                                 alleles = formatAndReturnGenotype(genotype, REF, ALT)
-                                complements = takeComplement(possibleAlleles[rsID], alleles, REF, ALT) if rsID in possibleAlleles else None
+                                complements = takeComplement(possibleAlleles[identifier_to_check], alleles, REF, ALT) if identifier_to_check in possibleAlleles else None
 
                                 # Grab or create maps that hold sets of unused variants for this sample
                                 clumpedVariants = clumped_snps_map[sample] if sample in clumped_snps_map else set()
@@ -490,9 +586,9 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
 
                                 atRisk = True if riskAllele in alleles or (complements is not None and riskAllele in complements) or "." in alleles else False
                                 if atRisk or not isIndividualClump:
-                                    if rsID in clumpsObjDict:
+                                    if identifier_to_check in clumpsObjDict:
                                         # Grab the clump number associated with this study and snp position
-                                        clumpNum = clumpsObjDict[rsID]['clumpNum']
+                                        clumpNum = clumpsObjDict[identifier_to_check]['clumpNum']
                                         # Check to see how many variants are in this clump. If there's only one, we can skip the clumping checks.
                                         clumpNumTotal = clumpNumDict[str((preferredPop,clumpNum))]
 
@@ -506,39 +602,39 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
                                                     # Check whether the existing index snp or current snp have a lower pvalue for this study
                                                     # and switch out the data accordingly
                                                     if pValue < index_pvalue:
-                                                        index_snp_map[sample][clumpNum] = rsID, riskAllele, alleles if complements is None else complements
+                                                        index_snp_map[sample][clumpNum] = identifier_to_check, riskAllele, alleles if complements is None else complements
                                                         clumpedVariants.add(index_snp)
                                                         usedSnps[sample].discard(index_snp)
                                                     else:
                                                         if index_alleles == "" and alleles != "" and isIndividualClump:
-                                                            index_snp_map[sample][clumpNum] = rsID, riskAllele, alleles if complements is None else complements
+                                                            index_snp_map[sample][clumpNum] = identifier_to_check, riskAllele, alleles if complements is None else complements
                                                             clumpedVariants.add(index_snp)
                                                             usedSnps[sample].discard(index_snp)
                                                         else:
-                                                            clumpedVariants.add(rsID)
-                                                            usedSnps[sample].discard(rsID)
+                                                            clumpedVariants.add(identifier_to_check)
+                                                            usedSnps[sample].discard(identifier_to_check)
                                                 else:
                                                     # Since the clump number for this snp position and study/name
                                                     # doesn't already exist, add it to the index map and the sample map
-                                                    index_snp_map[sample][clumpNum] = rsID, riskAllele, alleles if complements is None else complements
+                                                    index_snp_map[sample][clumpNum] = identifier_to_check, riskAllele, alleles if complements is None else complements
                                             else:
                                                 # Since the study/name combo wasn't already used in the index map, add it to both the index and sample map
-                                                index_snp_map[sample][clumpNum] = rsID, riskAllele, alleles if complements is None else complements
+                                                index_snp_map[sample][clumpNum] = identifier_to_check, riskAllele, alleles if complements is None else complements
                                         # the variant is the only one in the ld clump
                                         else:
-                                            sample_map[sample][rsID] = alleles if complements is None else complements
+                                            sample_map[sample][identifier_to_check] = alleles if complements is None else complements
                                     # the variant isn't in the clump tables
                                     else:
-                                        sample_map[sample][rsID] = alleles if complements is None else complements
+                                        sample_map[sample][identifier_to_check] = alleles if complements is None else complements
 
                                 # the sample's alleles don't include the risk allele and early clumping is not requested
                                 else:
-                                    unmatchedAlleleVariants.add(rsID)
+                                    unmatchedAlleleVariants.add(identifier_to_check)
 
                                     clumped_snps_map[sample] = clumpedVariants
                                     neutral_snps_map[sample] = unmatchedAlleleVariants
                         else:
-                            excludedDueToCutoffs.add(rsID)
+                            excludedDueToCutoffs.add(identifier_to_check)
 
         usedSnpsAcrossAllSamps = set()
         for samp in usedSnps:
@@ -564,9 +660,9 @@ def parse_vcf(filteredFilePath, clumpsObjDict, tableObjDict, possibleAlleles, sn
                         mafVal = mafDict[rsID]['alleles'][riskAllele] if rsID in mafDict and riskAllele in mafDict[rsID]["alleles"] else 0
                         # compare the pvalue to the pvalue cutoff
                         if pValue <= p_cutOff and mafVal >= mafCutoff:
-                            if rsID in clumpsObjDict:
+                            if identifier_to_check in clumpsObjDict:
                                 # Grab the clump number associated with this study and snp position
-                                clumpNum = clumpsObjDict[rsID]['clumpNum']
+                                clumpNum = clumpsObjDict[identifier_to_check]['clumpNum']
                                 # Check to see how many variants are in this clump. If there's only one, we can skip the clumping checks.
                                 clumpNumTotal = clumpNumDict[str((preferredPop,clumpNum))]
 

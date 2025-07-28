@@ -20,3 +20,4 @@ core
 /tables/clumping/CHROM_CLUMPED_FILES/
 static/downloadables/.workingFiles
 static/downloadables/__pycache__
+.serena/cache/

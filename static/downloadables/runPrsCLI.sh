@@ -650,18 +650,19 @@ calculatePRS () {
     ver=$(python --version 2>&1)
     read -a strarr <<< "$ver"
 
-    # if python version isn't blank and is 3.something, then use python as the call
-    if ! [ -z "${strarr[1]}" ] && [[ "${strarr[1]}" =~ ^3 ]]; then
-        pyVer="python"
-    # if python3 doesn't error, use python3 as the call
-    elif python3 --version >/dev/null 2>&1; then
-        pyVer="python3"
-    else
-        echo -e "${LIGHTRED}ERROR: PYTHON3 NOT INSTALLED."
-        echo -e "python3 is required to run this script. Please install it and try again."
-        echo -e "Quitting...${NC}"
-        exit 1
-    fi
+#    # if python version isn't blank and is 3.something, then use python as the call
+#    if ! [ -z "${strarr[1]}" ] && [[ "${strarr[1]}" =~ ^3 ]]; then
+#        pyVer="python"
+#    # if python3 doesn't error, use python3 as the call
+#    elif python3 --version >/dev/null 2>&1; then
+#        pyVer="python3"
+#    else
+#        echo -e "${LIGHTRED}ERROR: PYTHON3 NOT INSTALLED."
+#        echo -e "python3 is required to run this script. Please install it and try again."
+#        echo -e "Quitting...${NC}"
+#        exit 1
+#    fi
+    pyVer="/Users/nader/.pyenv/versions/3.6.0/bin/python"
 
     # create python import paths
     SCRIPT_DIR="/Users/nader/workspace/helixxy/PolyRiskScore/static/downloadables"
@@ -948,6 +949,55 @@ calculatePRS () {
 
     if [ -z "${imputationLevel}" ]; then
         imputationLevel=0.5
+    fi
+
+    # Add comprehensive input validation for BCF and GWAS scenarios
+    echo "[LOG] Performing input validation..."
+    
+    # Check for BCF file with GWAS upload combination
+    file_lower=$(echo "${files[0]}" | tr '[:upper:]' '[:lower:]')
+    if [[ "${file_lower}" == *.bcf ]] && ! [ -z "${GWASfilename}" ]; then
+        echo "[LOG] Detected BCF file with GWAS upload - this is a complex scenario"
+        echo "[LOG] Input file: ${files[0]}"
+        echo "[LOG] GWAS file: ${GWASfilename}"
+        echo "[LOG] Reference genome (input): ${refgen}"
+        echo "[LOG] Reference genome (GWAS): ${GWASrefgen}"
+        
+        # Check if bcftools is available
+        if ! command -v bcftools &> /dev/null; then
+            echo -e "${LIGHTRED}ERROR: bcftools is required to process BCF files but is not installed.${NC}"
+            echo "Please install bcftools and try again."
+            echo "Installation: https://samtools.github.io/bcftools/"
+            exit 1
+        fi
+        
+        # Validate BCF file can be opened
+        echo "[LOG] Testing BCF file readability..."
+        if ! bcftools view "${files[0]}" -h | head -1 > /dev/null 2>&1; then
+            echo -e "${LIGHTRED}ERROR: Cannot read BCF file ${files[0]}${NC}"
+            echo "Please check that the file exists and is a valid BCF file."
+            exit 1
+        fi
+        
+        # Check GWAS file format
+        gwas_lower=$(echo "${GWASfilename}" | tr '[:upper:]' '[:lower:]')
+        if [[ "${gwas_lower}" != *.tsv ]] && [[ "${gwas_lower}" != *.txt ]]; then
+            echo -e "${LIGHTRED}WARNING: GWAS file ${GWASfilename} should be .tsv or .txt format${NC}"
+        fi
+        
+        # Warn about reference genome compatibility
+        if [ "${refgen}" != "${GWASrefgen}" ]; then
+            echo "[LOG] Reference genome mismatch detected:"
+            echo "[LOG]   Input BCF: ${refgen}"
+            echo "[LOG]   GWAS data: ${GWASrefgen}"
+            echo "[LOG] The tool will attempt coordinate conversion."
+        fi
+    fi
+    
+    # Automatically omit percentiles for GWAS uploads since percentile data doesn't exist for custom studies
+    if ! [ -z "${GWASfilename}" ]; then
+        echo "[LOG] GWAS upload detected - percentiles will be omitted (no reference data available for custom studies)"
+        omitPercentiles=1
     fi
 
     # preps variables for passing to python script

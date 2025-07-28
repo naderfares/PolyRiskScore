@@ -221,50 +221,57 @@ def formatGWASAndRetrieveClumps(GWASfile, userGwasBeta, GWASextension, GWASrefGe
             # Add super population to the super population set
             allSuperPops.add(preferredPop)
             # create the chrom:pos to snp dict
-            # if the chrom:pos not in the chromSnpDict
-            chromPos = ":".join([line[ci], line[pi]])
+            # Format chromPos to match BCF format (with 'chr' prefix if missing)
+            chrom = line[ci]
+            if not chrom.startswith('chr'):
+                chrom = 'chr' + chrom
+            chromPos = ":".join([chrom, line[pi]])
+            
+            # Store original rsID for reference
+            original_rsid = line[si]
             if chromPos not in chromSnpDict:
-                # add the chrom:pos with the snp rsID
-                chromSnpDict[chromPos] = line[si]
+                # Map chromPos to itself (chromPos will be the primary identifier)
+                chromSnpDict[chromPos] = chromPos
             
             # create the snp to associations stuff dict
-            # if snp not in associationsDict
-            if line[si] not in associationDict:
-                associationDict[line[si]] = {
+            # Use chromPos as the primary key instead of rsID
+            if chromPos not in associationDict:
+                associationDict[chromPos] = {
                     "pos": chromPos,
+                    "original_rsid": original_rsid,  # Store original rsID as metadata
                     "traits": {}
                 }
-            # if trait not in associationsDict[snp][traits]
-            if line[ti] not in associationDict[line[si]]["traits"]:
-                associationDict[line[si]]["traits"][line[ti]] = {}
-            # if studyID not in associationDict[snp]["traits"][trait]
-            if line[sii] not in associationDict[line[si]]["traits"][line[ti]]:
-                associationDict[line[si]]["traits"][line[ti]][line[sii]] = {}
-            # if pvalannotation not in associationDict[line[si]]["traits"][line[ti]][line[sii]]
+            # if trait not in associationsDict[chromPos][traits]
+            if line[ti] not in associationDict[chromPos]["traits"]:
+                associationDict[chromPos]["traits"][line[ti]] = {}
+            # if studyID not in associationDict[chromPos]["traits"][trait]
+            if line[sii] not in associationDict[chromPos]["traits"][line[ti]]:
+                associationDict[chromPos]["traits"][line[ti]][line[sii]] = {}
+            # if pvalannotation not in associationDict[chromPos]["traits"][line[ti]][line[sii]]
             pValueAnnotation = line[pvai] if pvai != -1 else "NA"
             betaAnnotation = line[bai] if bai != -1 else "NA"
             valueType = "beta" if userGwasBeta else "OR"
             pvalBetaAnnoValType = pValueAnnotation + "|" + betaAnnotation + "|" + valueType
-            if pvalBetaAnnoValType not in associationDict[line[si]]["traits"][line[ti]][line[sii]]:
-                associationDict[line[si]]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType] = {}
+            if pvalBetaAnnoValType not in associationDict[chromPos]["traits"][line[ti]][line[sii]]:
+                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType] = {}
             
-            riskAllele = runStrandFlipping(line[si], line[rai])
-            if riskAllele not in associationDict[line[si]]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType]:
-                associationDict[line[si]]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]= {
+            riskAllele = runStrandFlipping(original_rsid, line[rai])
+            if riskAllele not in associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType]:
+                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]= {
                     "pValue": float(line[pvi]),
                     "sex": "NA",
                     "ogValueTypes": 'beta' if userGwasBeta else 'OR'
                 }
                 if userGwasBeta:
-                    associationDict[line[si]]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaValue'] = float(line[bvi])
-                    associationDict[line[si]]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = line[bui]
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaValue'] = float(line[bvi])
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = line[bui]
                 else:
-                    associationDict[line[si]]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['oddsRatio'] = float(line[ori])
-                    associationDict[line[si]]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = 'NA'
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['oddsRatio'] = float(line[ori])
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = 'NA'
         
             else:
                 # if the snp is duplicated, notify the user and exit
-                raise SystemExit("ERROR: The GWAS file contains at least one duplicated snp for the following combination. {}, {}, {}, {}, . \n Please ensure that there is only one snp for each combination.".format(line[si], line[ti], line[sii], pvalBetaAnnoValType))
+                raise SystemExit("ERROR: The GWAS file contains at least one duplicated snp for the following combination. {}, {}, {}, {}, . \n Please ensure that there is only one snp for each combination.".format(chromPos, line[ti], line[sii], pvalBetaAnnoValType))
 
             # create the metadata info dict
             # if the studyID is not in the studyIDsToMetaData
@@ -293,8 +300,8 @@ def formatGWASAndRetrieveClumps(GWASfile, userGwasBeta, GWASextension, GWASrefGe
             traitStudyIDPValAnno = "|".join(joinList)
             if traitStudyIDPValAnno not in studySnpsData:
                 studySnpsData[traitStudyIDPValAnno] = []
-            # add snp to the traitStudyIDToSnp
-            studySnpsData[traitStudyIDPValAnno].append(line[si])
+            # add chromPos to the traitStudyIDToSnp (instead of rsID)
+            studySnpsData[traitStudyIDPValAnno].append(chromPos)
 
     GWASfileOpen.close()
     
@@ -831,6 +838,10 @@ def getPossibleAlleles(snpsFromAssociations):
         if snp.startswith("rs"):
             possibleAlleles = getVariantAlleles(snp, mv)
             snpsToPossibleAlleles[snp] = possibleAlleles
+        elif ":" in snp:
+            # For chromPos identifiers, we can't query MyVariant
+            # So we'll return empty alleles list (will be handled elsewhere)
+            snpsToPossibleAlleles[snp] = []
     return snpsToPossibleAlleles
 
 

@@ -1,6 +1,7 @@
 import zipfile
 import tarfile
 import gzip
+import os
 import os.path
 import json
 import subprocess
@@ -11,13 +12,160 @@ from connect_to_server import getPreferredPop, openFileForParsing
 
 def open_bcf_with_bcftools(input_bcf_path, bcftools_args=None):
     """
-    Abre BCF via bcftools view e retorna um iterador de linhas (como VCF texto).
+    Opens BCF via bcftools view and returns an iterator of lines (as VCF text).
     """
+    import shutil
+    
+    # Check if bcftools is installed and available
+    if not shutil.which("bcftools"):
+        raise SystemExit("ERROR: bcftools is required to process BCF files but is not installed or not in PATH.\n"
+                        "Please install bcftools and ensure it's available in your PATH.\n"
+                        "Installation instructions: https://samtools.github.io/bcftools/")
+    
+    # Validate input file exists
+    if not os.path.exists(input_bcf_path):
+        raise SystemExit(f"ERROR: BCF file not found: {input_bcf_path}")
+    
+    # Check if file is actually a BCF file
+    if not input_bcf_path.lower().endswith('.bcf'):
+        print(f"WARNING: File {input_bcf_path} does not have .bcf extension")
+    
     cmd = ["bcftools", "view", input_bcf_path, "-Ov"]
     if bcftools_args:
         cmd.extend(bcftools_args)
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, universal_newlines=True)
-    return process.stdout
+    
+    try:
+        print(f"[LOG] Opening BCF file with bcftools: {' '.join(cmd)}")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        
+        # Check if process started successfully
+        if process.poll() is not None:
+            stderr_output = process.stderr.read()
+            raise SystemExit(f"ERROR: bcftools failed to open BCF file.\n"
+                           f"Command: {' '.join(cmd)}\n"
+                           f"Error: {stderr_output}")
+        
+        return process.stdout
+    except FileNotFoundError:
+        raise SystemExit("ERROR: bcftools command not found. Please install bcftools.")
+    except Exception as e:
+        raise SystemExit(f"ERROR: Failed to open BCF file with bcftools: {str(e)}")
+
+
+def extract_genomic_regions_from_gwas(tableObjDict, allSnps):
+    """
+    Extract genomic regions from GWAS data for targeted bcftools queries.
+    
+    Args:
+        tableObjDict: Dictionary containing associations data
+        allSnps: Set of SNP identifiers to extract regions for
+    
+    Returns:
+        list: List of genomic regions in format "chr:pos" or "chr:start-end"
+    """
+    regions = []
+    
+    print(f"[LOG] Extracting genomic regions from {len(allSnps)} SNPs")
+    
+    for snp in allSnps:
+        # Check if this is a chromPos identifier (e.g., "chr6:147898804")
+        if ':' in snp and snp.startswith('chr'):
+            try:
+                chrom, pos = snp.split(':')
+                pos = int(pos)
+                # Create a small region around the position to catch nearby variants
+                # Use ±1000bp window to account for potential position differences
+                start = max(1, pos - 1000)
+                end = pos + 1000
+                region = f"{chrom}:{start}-{end}"
+                regions.append(region)
+                print(f"[LOG] Added region window from chromPos {snp}: {region}")
+            except (ValueError, IndexError):
+                # If parsing fails, use the original chromPos as exact position
+                regions.append(snp)
+                print(f"[LOG] Added region from chromPos (fallback): {snp}")
+        
+        # Also check if the SNP exists in associations with position info
+        elif snp in tableObjDict.get('associations', {}):
+            assoc = tableObjDict['associations'][snp]
+            if 'pos' in assoc and assoc['pos']:
+                try:
+                    pos_str = assoc['pos']
+                    if ':' in pos_str:
+                        chrom, pos = pos_str.split(':')
+                        pos = int(pos)
+                        
+                        # Add 'chr' prefix if missing (database often uses "1:123" but BCF uses "chr1:123")
+                        if not chrom.startswith('chr'):
+                            chrom = 'chr' + chrom
+                        
+                        start = max(1, pos - 1000)
+                        end = pos + 1000
+                        region = f"{chrom}:{start}-{end}"
+                        regions.append(region)
+                        print(f"[LOG] Added region window from associations[{snp}] ({pos_str} -> {region})")
+                    else:
+                        # Handle position without colon - assume it's just a position number
+                        regions.append(pos_str)
+                        print(f"[LOG] Added region from associations[{snp}]: {pos_str}")
+                except (ValueError, IndexError):
+                    regions.append(assoc['pos'])
+                    print(f"[LOG] Added region from associations[{snp}] (fallback): {assoc['pos']}")
+    
+    # Remove duplicates and sort
+    unique_regions = sorted(list(set(regions)))
+    print(f"[LOG] Extracted {len(unique_regions)} unique genomic regions with ±1000bp windows")
+    if unique_regions:
+        print(f"[LOG] Sample regions: {unique_regions[:3]}{'...' if len(unique_regions) > 3 else ''}")
+    
+    return unique_regions
+
+
+def open_bcf_with_region_queries(input_bcf_path, regions_list):
+    """
+    Opens BCF file using bcftools with targeted region queries for better performance.
+    
+    Args:
+        input_bcf_path: Path to BCF file
+        regions_list: List of regions in format "chr:pos" or "chr:start-end"
+    
+    Returns:
+        Iterator of VCF lines for only the specified regions
+    """
+    import shutil
+    
+    # Check if bcftools is installed
+    if not shutil.which("bcftools"):
+        raise SystemExit("ERROR: bcftools is required to process BCF files but is not installed or not in PATH.\n"
+                        "Please install bcftools and ensure it's available in your PATH.\n"
+                        "Installation instructions: https://samtools.github.io/bcftools/")
+    
+    if not regions_list:
+        print("[LOG] No regions specified, falling back to full file scan")
+        return open_bcf_with_bcftools(input_bcf_path)
+    
+    # Use bcftools view with -r flag for direct regions (more reliable than -R)
+    # Join all regions with comma for -r flag
+    regions_string = ",".join(regions_list)
+    cmd = ["bcftools", "view", input_bcf_path, "-r", regions_string, "-Ov"]
+    
+    print(f"[LOG] Opening BCF with targeted regions: {' '.join(cmd[:4])} -r '{regions_string[:100]}{'...' if len(regions_string) > 100 else ''}' -Ov")
+    print(f"[LOG] Targeting {len(regions_list)} specific regions instead of scanning entire file")
+    
+    try:
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        
+        # Check if process started successfully
+        if process.poll() is not None:
+            stderr_output = process.stderr.read()
+            raise SystemExit(f"ERROR: bcftools failed to query regions.\n"
+                           f"Command: {' '.join(cmd)}\n"
+                           f"Error: {stderr_output}")
+        
+        return process.stdout
+        
+    except Exception as e:
+        raise SystemExit(f"ERROR: Failed to query BCF regions: {str(e)}")
 
 
 # filter the input vcf or txt file so that it only include SNPs that exist in the PRSKB database
@@ -62,7 +210,13 @@ def createFilteredFile(inputFilePath, fileHash, requiredParamsHash, superPop, re
         raise SystemExit("WARNING: None of the studies in the database match the specified filters. Adjust your filters and try again.")
 
     # create a new filtered file that only includes associations in the user-specified studies
+    print(f"[LOG] Total SNPs available for filtering: {len(allSnps)}")
+    print(f"[LOG] Input files to process: {inputFiles}")
+    print(f"[LOG] Using BCF format: {isBCF}")
+    print(f"[LOG] Using GWAS upload: {useGWASupload}")
+    
     if isBCF:
+        print(f"[LOG] Processing BCF file with filterVCF function")
         clumpNumDict = filterVCF(
             tableObjDict, allClumpsObjDict, allSnps, inputFiles,
             filteredInputPath, useGWASupload, isBCF=True
@@ -293,6 +447,32 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
     usedSnps = set()
     # create a set to keep track of which ld clump numbers are assigned to only a single snp
     clumpNumDict = {}
+    
+    print(f"[LOG] filterVCF: Processing {len(inputFiles)} files")
+    print(f"[LOG] filterVCF: isBCF={isBCF}, useGWASupload={useGWASupload}")
+    print(f"[LOG] filterVCF: Output path: {filteredFilePath}")
+    print(f"[LOG] filterVCF: Available SNPs for matching: {len(allSnps)}")
+    if len(allSnps) < 10:  # Only print if manageable number
+        print(f"[LOG] filterVCF: SNPs to match: {list(allSnps)[:10]}...")
+    
+    # Log association keys for debugging
+    if 'associations' in tableObjDict:
+        assoc_keys = list(tableObjDict['associations'].keys())
+        print(f"[LOG] filterVCF: Association keys available: {len(assoc_keys)}")
+        if len(assoc_keys) < 10:
+            print(f"[LOG] filterVCF: Sample association keys: {assoc_keys[:5]}")
+        else:
+            print(f"[LOG] filterVCF: Sample association keys: {assoc_keys[:5]}...")
+    
+    # Extract genomic regions for targeted BCF queries (performance optimization)
+    regions_list = []
+    if isBCF and len(allSnps) > 0:
+        regions_list = extract_genomic_regions_from_gwas(tableObjDict, allSnps)
+        if regions_list:
+            print(f"[LOG] filterVCF: PERFORMANCE OPTIMIZATION - Will query {len(regions_list)} specific regions instead of scanning entire BCF")
+        else:
+            print(f"[LOG] filterVCF: No regions extracted, falling back to full BCF scan")
+    
     with open(filteredFilePath, 'w') as w:
         # Create a boolean to check whether the input VCF is empty
         fileEmpty = True
@@ -302,15 +482,30 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
         firstFile = True
 
         for aFile in inputFiles:
+            print(f"[LOG] filterVCF: Processing input file: {aFile}")
             # open the input file path for opening
             if isBCF:
-                inputVCF = open_bcf_with_bcftools(aFile)
+                if regions_list:
+                    print(f"[LOG] filterVCF: Opening BCF file with targeted region queries")
+                    inputVCF = open_bcf_with_region_queries(aFile, regions_list)
+                else:
+                    print(f"[LOG] filterVCF: Opening BCF file with bcftools (full scan)")
+                    inputVCF = open_bcf_with_bcftools(aFile)
             else:
+                print(f"[LOG] filterVCF: Opening VCF file normally")
                 inputVCF = openFileForParsing(aFile)
 
             try:
                 allPosInInput = set()
+                line_count = 0
+                variant_count = 0
+                matched_count = 0
+                
                 for line in inputVCF:
+                    line_count += 1
+                    if line_count <= 10:  # Log first few lines for debugging
+                        print(f"[LOG] filterVCF: Line {line_count}: {line[:100]}...")
+                    
                     # cut the line so that we don't use memory to tab split a huge file
                     shortLine = line[0:500]
                     if shortLine[0] == '#':
@@ -318,10 +513,15 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
                             w.write(line)
                     else:
                         line = line.strip()
-                        cols = shortLine.split('\t')
+                        cols = shortLine.split('	')
+                        variant_count += 1
+                        
                         # get the rsid and chrompos
                         rsID = cols[2]
                         chromPos = str(cols[0]) + ':' + str(cols[1])
+                        
+                        if variant_count <= 5:  # Log first few variants for debugging
+                            print(f"[LOG] filterVCF: Variant {variant_count}: rsID='{rsID}', chromPos='{chromPos}'")
                         # ensure we don't have duplicate lines of SNPs in input file
                         if chromPos in allPosInInput:
                             raise SystemExit(f'Found multiple lines for position {chromPos}. Please consolidate into a single line in the input file and run again. This can be done with the following command:\n\tbcftools norm -Ov -m+any original.vcf > original-merged.vcf\nwhere original.vcf is your input file and original-merged.vcf is your new vcf file.')
@@ -329,26 +529,80 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
                             allPosInInput.add(chromPos)
                         # a record exists, so the file was not empty
                         fileEmpty = False
-                        if (chromPos in tableObjDict['associations'] and (rsID is None or rsID not in tableObjDict['associations'])):
-                            rsID = tableObjDict['associations'][chromPos]
+                        
+                        # Check if we should use chromPos for matching
+                        identifier_to_check = rsID
+                        
+                        if useGWASupload and chromPos in allSnps:
+                            # GWAS upload mode: Use chromPos directly
+                            identifier_to_check = chromPos
+                        elif rsID is None or rsID == '.' or rsID == '':
+                            # BCF has no rsID (rsID='.'), try position-based matching
+                            # Check if any SNP in our set maps to this position
+                            position_match_found = False
+                            for snp in allSnps:
+                                if snp in tableObjDict.get('associations', {}):
+                                    assoc = tableObjDict['associations'][snp]
+                                    if 'pos' in assoc and assoc['pos']:
+                                        # Convert database position to BCF format for comparison
+                                        db_pos = assoc['pos']
+                                        if ':' in db_pos:
+                                            db_chrom, db_pos_num = db_pos.split(':')
+                                            if not db_chrom.startswith('chr'):
+                                                db_chrom = 'chr' + db_chrom
+                                            db_chrompos = f"{db_chrom}:{db_pos_num}"
+                                            
+                                            if db_chrompos == chromPos:
+                                                identifier_to_check = snp  # Use the rsID from database
+                                                position_match_found = True
+                                                if variant_count <= 5:
+                                                    print(f"[LOG] filterVCF: Position match found! BCF {chromPos} matches DB {snp} at {db_pos}")
+                                                break
+                            
+                            if not position_match_found:
+                                identifier_to_check = chromPos  # Fallback to chromPos
+                        elif (chromPos in tableObjDict['associations'] and rsID not in tableObjDict['associations']):
+                            # Legacy logic for when chromPos maps to rsID
+                            if isinstance(tableObjDict['associations'][chromPos], str):
+                                rsID = tableObjDict['associations'][chromPos]
+                                identifier_to_check = rsID
+                        
                         # check if the snp is in the filtered studies
-                        if (rsID in allSnps) or useGWASupload:
-                            usedSnps.add(rsID)
+                        identifier_in_snps = identifier_to_check in allSnps
+                        chromPos_in_assoc = chromPos in tableObjDict.get('associations', {})
+                        
+                        if variant_count <= 5:  # Log matching details for first few variants
+                            print(f"[LOG] filterVCF: Matching check - identifier='{identifier_to_check}', identifier_in_snps={identifier_in_snps}, chromPos_in_assoc={chromPos_in_assoc}, useGWASupload={useGWASupload}")
+                        
+                        if identifier_in_snps:
+                            usedSnps.add(identifier_to_check)
+                            matched_count += 1
+                            if matched_count <= 5:
+                                print(f"[LOG] filterVCF: MATCH {matched_count}: rsID={rsID}, chromPos={chromPos}")
                             # increase count of the ld clump this snp is in
                             # We use the clumpNumDict later in the parsing functions to determine which variants are not in LD with any of the other variants
                             for pop in allClumpsObjDict.keys():
-                                if rsID in allClumpsObjDict[pop]:
-                                    clumpNum = allClumpsObjDict[pop][rsID]['clumpNum']
+                                if identifier_to_check in allClumpsObjDict[pop]:
+                                    clumpNum = allClumpsObjDict[pop][identifier_to_check]['clumpNum']
                                     clumpNumDict[str((pop, clumpNum))] = clumpNumDict.get(str((pop, clumpNum)), 0) + 1
 
                             # write the line to the filtered VCF
                             w.write(line)
                             w.write("\n")
                             inputInFilters = True
+                print(f"[LOG] filterVCF: File {aFile} summary:")
+                print(f"[LOG]   Total lines processed: {line_count}")
+                print(f"[LOG]   Total variants found: {variant_count}")
+                print(f"[LOG]   Variants matched: {matched_count}")
+                
                 allPosInInput = set()
 
-            except ValueError:
+            except ValueError as e:
+                print(f"[LOG] filterVCF: ValueError processing {aFile}: {str(e)}")
                 raise SystemExit("The VCF file is not formatted correctly. Each line must have 'GT' (genotype) formatting and a non-Null value for the chromosome and position.")
+            except Exception as e:
+                print(f"[LOG] filterVCF: Unexpected error processing {aFile}: {str(e)}")
+                raise
             
             firstFile = False
 
@@ -356,8 +610,19 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
             raise SystemExit("The VCF file is either empty or formatted incorrectly. Each line must have 'GT' (genotype) formatting and a non-Null value for the chromosome and position")
 
         # send error message if input not in filters
+        print(f"[LOG] filterVCF: Final summary:")
+        print(f"[LOG]   Total unique SNPs used: {len(usedSnps)}")
+        print(f"[LOG]   Input matched filters: {inputInFilters}")
+        
         if not inputInFilters:
-            raise SystemExit("WARNING: None of the variants available in the input file match the variants given by the specified filters. Check your input file and your filters and try again.")
+            print(f"[LOG] filterVCF: No variants matched! Diagnostic info:")
+            print(f"[LOG]   - Expected SNPs available: {len(allSnps)}")
+            print(f"[LOG]   - Association keys available: {len(tableObjDict.get('associations', {}))}")
+            print(f"[LOG]   - Using GWAS upload: {useGWASupload}")
+            if not useGWASupload and len(allSnps) == 0:
+                raise SystemExit("ERROR: No SNPs available for filtering. This likely means the required data files (associations, study SNPs) are missing or empty.")
+            else:
+                raise SystemExit("WARNING: None of the variants available in the input file match the variants given by the specified filters. Check your input file and your filters and try again.")
 
         # here we add in the other snps that are not in the sample but are in the study
         toAdd = allSnps.difference(usedSnps)
