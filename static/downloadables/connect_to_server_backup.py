@@ -183,12 +183,7 @@ def formatGWASAndRetrieveClumps(GWASfile, userGwasBeta, GWASextension, GWASrefGe
 
     firstLine = True
     duplicatesSet = set()
-    
-    # Collect all lines for batch processing
-    lines_to_process = []
-    snps_for_flipping = []
 
-    # First pass: collect all data for batch processing
     for line in GWASfileOpen:
         line = line.strip()
         if len(line) == 0: # skip lines that don't have content
@@ -220,117 +215,95 @@ def formatGWASAndRetrieveClumps(GWASfile, userGwasBeta, GWASextension, GWASrefGe
             bai = headers.index("beta annotation") if "beta annotation" in headers else -1
 
         else:
-            # Store line for batch processing
-            lines_to_process.append(line)
-    
-    GWASfileOpen.close()
-    
-    # Collect SNPs for batch strand flipping
-    print(f"[LOG] Collecting SNPs from {len(lines_to_process)} lines for batch processing...")
-    for line in lines_to_process:
-        line_parts = line.split("\t")
-        if len(line_parts) > max(si, rai):
-            original_rsid = line_parts[si]
-            risk_allele = line_parts[rai]
-            if original_rsid and risk_allele:
-                snps_for_flipping.append((original_rsid, risk_allele))
-    
-    # Batch process strand flipping
-    print(f"[LOG] Starting batch strand flipping for {len(snps_for_flipping)} SNP-allele pairs...")
-    flipped_alleles = batchStrandFlipping(snps_for_flipping)
-    print(f"[LOG] Batch strand flipping complete")
-    
-    # Second pass: process lines with flipped alleles
-    print(f"[LOG] Processing GWAS data with pre-computed strand flipping...")
-    for line in lines_to_process:
-        line = line.split("\t")
-        # Add super population to the super population set
-        preferredPop = getPreferredPop(line[spi], superPop)
-        # Add super population to the super population set
-        allSuperPops.add(preferredPop)
-        # create the chrom:pos to snp dict
-        # Format chromPos to match BCF format (with 'chr' prefix if missing)
-        chrom = line[ci]
-        if not chrom.startswith('chr'):
-            chrom = 'chr' + chrom
-        chromPos = ":".join([chrom, line[pi]])
-        
-        # Store original rsID for reference
-        original_rsid = line[si]
-        if chromPos not in chromSnpDict:
-            # Map chromPos to itself (chromPos will be the primary identifier)
-            chromSnpDict[chromPos] = chromPos
-        
-        # create the snp to associations stuff dict
-        # Use chromPos as the primary key instead of rsID
-        if chromPos not in associationDict:
-            associationDict[chromPos] = {
-                "pos": chromPos,
-                "original_rsid": original_rsid,  # Store original rsID as metadata
-                "traits": {}
-            }
-        # if trait not in associationsDict[chromPos][traits]
-        if line[ti] not in associationDict[chromPos]["traits"]:
-            associationDict[chromPos]["traits"][line[ti]] = {}
-        # if studyID not in associationDict[chromPos]["traits"][trait]
-        if line[sii] not in associationDict[chromPos]["traits"][line[ti]]:
-            associationDict[chromPos]["traits"][line[ti]][line[sii]] = {}
-        # if pvalannotation not in associationDict[chromPos]["traits"][line[ti]][line[sii]]
-        pValueAnnotation = line[pvai] if pvai != -1 and pvai < len(line) else "NA"
-        betaAnnotation = line[bai] if bai != -1 and bai < len(line) else "NA"
-        valueType = "beta" if userGwasBeta else "OR"
-        pvalBetaAnnoValType = pValueAnnotation + "|" + betaAnnotation + "|" + valueType
-        if pvalBetaAnnoValType not in associationDict[chromPos]["traits"][line[ti]][line[sii]]:
-            associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType] = {}
-        
-        # Use pre-computed flipped allele
-        riskAllele = flipped_alleles.get((original_rsid, line[rai]), line[rai])
-        if riskAllele not in associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType]:
-            associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]= {
-                "pValue": float(line[pvi]),
-                "sex": "NA",
-                "ogValueTypes": 'beta' if userGwasBeta else 'OR'
-            }
-            if userGwasBeta:
-                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaValue'] = float(line[bvi])
-                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = line[bui]
-            else:
-                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['oddsRatio'] = float(line[ori])
-                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = 'NA'
-    
-        else:
-            # if the snp is duplicated, notify the user and exit
-            raise SystemExit("ERROR: The GWAS file contains at least one duplicated snp for the following combination. {}, {}, {}, {}, . \n Please ensure that there is only one snp for each combination.".format(chromPos, line[ti], line[sii], pvalBetaAnnoValType))
-
-        # create the metadata info dict
-        # if the studyID is not in the studyIDsToMetaData
-        if line[sii] not in studyIDsToMetaData:
-            studyIDsToMetaData[line[sii]] = {
-                "citation": line[cti] if cti != -1 and cti < len(line) else "",
-                "reportedTrait": line[rti] if rti != -1 and rti < len(line) else "",
-                "studyTypes": [],
-                "traits": {},
-                "ethnicity": []
-            }
-        # if the trait is not in the studyIDsToMetaData[studyID]["traits"]
-        if line[ti] not in studyIDsToMetaData[line[sii]]["traits"]:
-            # add the trait
-            studyIDsToMetaData[line[sii]]["traits"][line[ti]] = {
-                "studyTypes": [],
-                "pValBetaAnnoValType": [pvalBetaAnnoValType],
-                "superPopulations": [line[spi]]
-            }
-        else:
-            studyIDsToMetaData[line[sii]]["traits"][line[ti]]['pValBetaAnnoValType'].append(pvalBetaAnnoValType)
+            line = line.split("\t")
+            # Add super population to the super population set
+            preferredPop = getPreferredPop(line[spi], superPop)
+            # Add super population to the super population set
+            allSuperPops.add(preferredPop)
+            # create the chrom:pos to snp dict
+            # Format chromPos to match BCF format (with 'chr' prefix if missing)
+            chrom = line[ci]
+            if not chrom.startswith('chr'):
+                chrom = 'chr' + chrom
+            chromPos = ":".join([chrom, line[pi]])
             
-        # create studyID/trait/pValueAnnotation to snps
-        # if trait|studyID|pValueAnnotation not in the studySnpsData
-        joinList = [line[ti], pvalBetaAnnoValType, line[sii]]
-        traitStudyIDPValAnno = "|".join(joinList)
-        if traitStudyIDPValAnno not in studySnpsData:
-            studySnpsData[traitStudyIDPValAnno] = []
-        # add chromPos to the traitStudyIDToSnp (instead of rsID)
-        studySnpsData[traitStudyIDPValAnno].append(chromPos)
+            # Store original rsID for reference
+            original_rsid = line[si]
+            if chromPos not in chromSnpDict:
+                # Map chromPos to itself (chromPos will be the primary identifier)
+                chromSnpDict[chromPos] = chromPos
+            
+            # create the snp to associations stuff dict
+            # Use chromPos as the primary key instead of rsID
+            if chromPos not in associationDict:
+                associationDict[chromPos] = {
+                    "pos": chromPos,
+                    "original_rsid": original_rsid,  # Store original rsID as metadata
+                    "traits": {}
+                }
+            # if trait not in associationsDict[chromPos][traits]
+            if line[ti] not in associationDict[chromPos]["traits"]:
+                associationDict[chromPos]["traits"][line[ti]] = {}
+            # if studyID not in associationDict[chromPos]["traits"][trait]
+            if line[sii] not in associationDict[chromPos]["traits"][line[ti]]:
+                associationDict[chromPos]["traits"][line[ti]][line[sii]] = {}
+            # if pvalannotation not in associationDict[chromPos]["traits"][line[ti]][line[sii]]
+            pValueAnnotation = line[pvai] if pvai != -1 and pvai < len(line) else "NA"
+            betaAnnotation = line[bai] if bai != -1 and bai < len(line) else "NA"
+            valueType = "beta" if userGwasBeta else "OR"
+            pvalBetaAnnoValType = pValueAnnotation + "|" + betaAnnotation + "|" + valueType
+            if pvalBetaAnnoValType not in associationDict[chromPos]["traits"][line[ti]][line[sii]]:
+                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType] = {}
+            
+            riskAllele = runStrandFlipping(original_rsid, line[rai])
+            if riskAllele not in associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType]:
+                associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]= {
+                    "pValue": float(line[pvi]),
+                    "sex": "NA",
+                    "ogValueTypes": 'beta' if userGwasBeta else 'OR'
+                }
+                if userGwasBeta:
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaValue'] = float(line[bvi])
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = line[bui]
+                else:
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['oddsRatio'] = float(line[ori])
+                    associationDict[chromPos]["traits"][line[ti]][line[sii]][pvalBetaAnnoValType][riskAllele]['betaUnit'] = 'NA'
+        
+            else:
+                # if the snp is duplicated, notify the user and exit
+                raise SystemExit("ERROR: The GWAS file contains at least one duplicated snp for the following combination. {}, {}, {}, {}, . \n Please ensure that there is only one snp for each combination.".format(chromPos, line[ti], line[sii], pvalBetaAnnoValType))
+
+            # create the metadata info dict
+            # if the studyID is not in the studyIDsToMetaData
+            if line[sii] not in studyIDsToMetaData:
+                studyIDsToMetaData[line[sii]] = {
+                    "citation": line[cti] if cti != -1 and cti < len(line) else "",
+                    "reportedTrait": line[rti] if rti != -1 and rti < len(line) else "",
+                    "studyTypes": [],
+                    "traits": {},
+                    "ethnicity": []
+                }
+            # if the trait is not in the studyIDsToMetaData[studyID]["traits"]
+            if line[ti] not in studyIDsToMetaData[line[sii]]["traits"]:
+                # add the trait
+                studyIDsToMetaData[line[sii]]["traits"][line[ti]] = {
+                    "studyTypes": [],
+                    "pValBetaAnnoValType": [pvalBetaAnnoValType],
+                    "superPopulations": [line[spi]]
+                }
+            else:
+                studyIDsToMetaData[line[sii]]["traits"][line[ti]]['pValBetaAnnoValType'].append(pvalBetaAnnoValType)
+                
+            # create studyID/trait/pValueAnnotation to snps
+            # if trait|studyID|pValueAnnotation not in the studySnpsData
+            joinList = [line[ti], pvalBetaAnnoValType, line[sii]]
+            traitStudyIDPValAnno = "|".join(joinList)
+            if traitStudyIDPValAnno not in studySnpsData:
+                studySnpsData[traitStudyIDPValAnno] = []
+            # add chromPos to the traitStudyIDToSnp (instead of rsID)
+            studySnpsData[traitStudyIDPValAnno].append(chromPos)
+
+    GWASfileOpen.close()
     
     print(f"[LOG] GWAS file parsing completed:")
     print(f"[LOG]   Parsed {len(associationDict)} SNPs from GWAS file")
@@ -840,17 +813,13 @@ def getSpecificAssociations(refGen, traits, studyTypes, studyIDs, ethnicity, val
     return associationData, finalStudyList
 
 
-def runStrandFlipping(snp, allele, cached_alleles=None):
-    """Single strand flipping with optional cached alleles"""
+def runStrandFlipping(snp, allele):
     import myvariant
     from Bio.Seq import Seq
 
-    if cached_alleles is not None and snp in cached_alleles:
-        possibleAlleles = cached_alleles[snp]
-    else:
-        mv = myvariant.MyVariantInfo()
-        possibleAlleles = getVariantAlleles(snp, mv)
-    
+    mv = myvariant.MyVariantInfo()
+
+    possibleAlleles = getVariantAlleles(snp, mv)
     riskAllele = Seq(allele)
     if riskAllele not in possibleAlleles:
         complement = riskAllele.reverse_complement()
@@ -859,79 +828,6 @@ def runStrandFlipping(snp, allele, cached_alleles=None):
             riskAllele = complement
     
     return str(riskAllele)
-
-def batchStrandFlipping(snp_allele_pairs):
-    """
-    Batch process strand flipping for multiple SNPs at once.
-    
-    Args:
-        snp_allele_pairs: List of (snp, allele) tuples
-    
-    Returns:
-        Dict mapping (snp, allele) to flipped allele
-    """
-    import myvariant
-    from Bio.Seq import Seq
-    
-    if not snp_allele_pairs:
-        return {}
-    
-    print(f"[LOG] Batch processing {len(snp_allele_pairs)} SNPs for strand flipping...")
-    
-    # Get unique SNPs for batch query
-    unique_snps = list(set([snp for snp, _ in snp_allele_pairs if snp and snp.startswith('rs')]))
-    
-    # Batch fetch possible alleles using MyVariant batch API
-    cached_alleles = {}
-    if unique_snps:
-        print(f"[LOG] Fetching alleles for {len(unique_snps)} unique rsIDs using batch API...")
-        cached_alleles = getBatchVariantAlleles(unique_snps)
-    
-    # Process each SNP-allele pair
-    results = {}
-    flip_count = 0
-    
-    for snp, allele in snp_allele_pairs:
-        if not snp or not allele:
-            results[(snp, allele)] = allele
-            continue
-            
-        if snp.startswith('rs'):
-            # Use cached alleles for rsIDs
-            possibleAlleles = cached_alleles.get(snp, [])
-            
-            # If no alleles found via API, use simple complement rules
-            if not possibleAlleles:
-                # For common SNPs, try simple complement
-                complement_map = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-                if allele in complement_map:
-                    complement = complement_map[allele]
-                    results[(snp, allele)] = allele  # Default to original
-                else:
-                    results[(snp, allele)] = allele
-            else:
-                # Use API results for strand flipping
-                riskAllele = Seq(allele)
-                
-                if str(riskAllele) in possibleAlleles:
-                    # Original allele is valid
-                    results[(snp, allele)] = allele
-                else:
-                    # Try complement
-                    complement = riskAllele.reverse_complement()
-                    if str(complement) in possibleAlleles:
-                        print(f"[LOG] Strand flip: {snp} {allele} -> {complement}")
-                        results[(snp, allele)] = str(complement)
-                        flip_count += 1
-                    else:
-                        # Neither original nor complement found, keep original
-                        results[(snp, allele)] = allele
-        else:
-            # For non-rsID SNPs (chromPos), keep original
-            results[(snp, allele)] = allele
-    
-    print(f"[LOG] Strand flipping complete. Flipped {flip_count} alleles out of {len(results)} total")
-    return results
 
 
 def getPossibleAlleles(snpsFromAssociations):
@@ -949,145 +845,7 @@ def getPossibleAlleles(snpsFromAssociations):
     return snpsToPossibleAlleles
 
 
-def getBatchVariantAlleles(rsIDs):
-    """
-    Fetch variant alleles for multiple rsIDs using MyVariant batch API.
-    Much faster than individual queries. Includes local caching.
-    
-    Args:
-        rsIDs: List of rsID strings
-    
-    Returns:
-        Dict mapping rsID to list of alleles
-    """
-    import myvariant
-    import time
-    import os
-    import json
-    import hashlib
-    
-    if not rsIDs:
-        return {}
-    
-    # Check local cache first
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache")
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir)
-    
-    # Create cache key from sorted rsIDs
-    cache_key = hashlib.md5('|'.join(sorted(rsIDs)).encode()).hexdigest()
-    cache_file = os.path.join(cache_dir, f"alleles_{cache_key}.json")
-    
-    # Try to load from cache
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r') as f:
-                cached_data = json.load(f)
-            print(f"[LOG] Loaded {len(cached_data)} alleles from cache")
-            return cached_data
-        except:
-            pass  # Cache file corrupted, continue with API call
-    
-    print(f"[LOG] Using MyVariant batch API for {len(rsIDs)} SNPs...")
-    
-    mv = myvariant.MyVariantInfo()
-    cached_alleles = {}
-    
-    # MyVariant batch API supports up to 1000 queries per request
-    BATCH_SIZE = 1000
-    total_batches = (len(rsIDs) + BATCH_SIZE - 1) // BATCH_SIZE
-    
-    for batch_num in range(total_batches):
-        start_idx = batch_num * BATCH_SIZE
-        end_idx = min((batch_num + 1) * BATCH_SIZE, len(rsIDs))
-        batch_rsids = rsIDs[start_idx:end_idx]
-        
-        print(f"[LOG] Processing batch {batch_num + 1}/{total_batches} ({len(batch_rsids)} SNPs)...")
-        
-        try:
-            # Prepare batch query with dbsnp.rsid format
-            queries = [f"dbsnp.rsid:{rsid}" for rsid in batch_rsids]
-            
-            # Use batch query
-            start_time = time.time()
-            results = mv.querymany(
-                queries,
-                scopes="dbsnp.rsid",
-                fields="dbsnp.alleles.allele,dbsnp.ref,dbsnp.alt",
-                returnall=True,
-                verbose=False
-            )
-            elapsed = time.time() - start_time
-            print(f"[LOG] Batch {batch_num + 1} completed in {elapsed:.2f}s")
-            
-            # Process results
-            if 'out' in results:
-                for i, result in enumerate(results['out']):
-                    rsid = batch_rsids[i]
-                    alleles = set()
-                    
-                    if result and 'dbsnp' in result:
-                        dbsnp_data = result['dbsnp']
-                        
-                        # Extract alleles from different fields
-                        if 'alleles' in dbsnp_data:
-                            if isinstance(dbsnp_data['alleles'], list):
-                                for allele_obj in dbsnp_data['alleles']:
-                                    if isinstance(allele_obj, dict) and 'allele' in allele_obj:
-                                        alleles.add(allele_obj['allele'])
-                            elif isinstance(dbsnp_data['alleles'], dict) and 'allele' in dbsnp_data['alleles']:
-                                alleles.add(dbsnp_data['alleles']['allele'])
-                        
-                        # Add ref allele
-                        if 'ref' in dbsnp_data and dbsnp_data['ref']:
-                            alleles.add(dbsnp_data['ref'])
-                        
-                        # Add alt allele
-                        if 'alt' in dbsnp_data and dbsnp_data['alt']:
-                            if isinstance(dbsnp_data['alt'], list):
-                                alleles.update(dbsnp_data['alt'])
-                            else:
-                                alleles.add(dbsnp_data['alt'])
-                    
-                    cached_alleles[rsid] = list(alleles) if alleles else []
-            
-            # Handle missing results
-            if 'missing' in results:
-                for missing_query in results['missing']:
-                    # Extract rsID from "dbsnp.rsid:rs123" format
-                    if ':' in missing_query:
-                        rsid = missing_query.split(':', 1)[1]
-                        cached_alleles[rsid] = []
-                        print(f"[WARN] No alleles found for {rsid}")
-            
-            # Small delay between batches to be respectful to API
-            if batch_num < total_batches - 1:
-                time.sleep(0.1)
-                
-        except Exception as e:
-            print(f"[ERROR] Batch {batch_num + 1} failed: {e}")
-            # Fall back to empty alleles for this batch
-            for rsid in batch_rsids:
-                cached_alleles[rsid] = []
-    
-    found_count = sum(1 for alleles in cached_alleles.values() if alleles)
-    print(f"[LOG] Batch API complete: Found alleles for {found_count}/{len(rsIDs)} SNPs")
-    
-    # Save to cache for future use
-    try:
-        with open(cache_file, 'w') as f:
-            json.dump(cached_alleles, f)
-        print(f"[LOG] Saved alleles to cache for future use")
-    except Exception as e:
-        print(f"[WARN] Failed to save cache: {e}")
-    
-    return cached_alleles
-
 def getVariantAlleles(rsID, mv):
-    """
-    Legacy function for single variant allele lookup.
-    Kept for backward compatibility.
-    """
     import contextlib, io
 
     f=io.StringIO()

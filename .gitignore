@@ -21,3 +21,4 @@ core
 static/downloadables/.workingFiles
 static/downloadables/__pycache__
 .serena/cache/
+*.cache/

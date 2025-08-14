@@ -443,48 +443,6 @@ def filterTXT(allClumpsObjDict, allSnps, inputFiles, filteredFilePath, useGWASup
     return clumpNumDict
 
 
-def build_snp_lookup_index(allSnps, tableObjDict):
-    """
-    Build efficient lookup structures for SNP matching.
-    
-    Returns:
-        - rsid_index: Dict mapping rsID to association data
-        - pos_index: Dict mapping chromPos to association data
-    """
-    rsid_index = {}
-    pos_index = {}
-    
-    print(f"[LOG] Building SNP lookup index for {len(allSnps)} SNPs...")
-    
-    for snp in allSnps:
-        # Add direct SNP to indices
-        if snp.startswith('rs'):
-            rsid_index[snp] = snp
-        elif ':' in snp:
-            pos_index[snp] = snp
-            
-        # Also check associations for additional mappings
-        if snp in tableObjDict.get('associations', {}):
-            assoc = tableObjDict['associations'][snp]
-            
-            # Index by original rsID if available
-            if 'original_rsid' in assoc and assoc['original_rsid']:
-                rsid_index[assoc['original_rsid']] = snp
-            
-            # Index by position if available
-            if 'pos' in assoc and assoc['pos']:
-                pos = assoc['pos']
-                if ':' in pos:
-                    # Normalize position format
-                    chrom, pos_num = pos.split(':', 1)
-                    if not chrom.startswith('chr'):
-                        chrom = 'chr' + chrom
-                    normalized_pos = f"{chrom}:{pos_num}"
-                    pos_index[normalized_pos] = snp
-    
-    print(f"[LOG] Built index with {len(rsid_index)} rsIDs and {len(pos_index)} positions")
-    return rsid_index, pos_index
-
 def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFilePath, useGWASupload, isBCF=False):
     usedSnps = set()
     # create a set to keep track of which ld clump numbers are assigned to only a single snp
@@ -494,10 +452,17 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
     print(f"[LOG] filterVCF: isBCF={isBCF}, useGWASupload={useGWASupload}")
     print(f"[LOG] filterVCF: Output path: {filteredFilePath}")
     print(f"[LOG] filterVCF: Available SNPs for matching: {len(allSnps)}")
+    if len(allSnps) < 10:  # Only print if manageable number
+        print(f"[LOG] filterVCF: SNPs to match: {list(allSnps)[:10]}...")
     
-    # Build lookup indices for fast matching
-    rsid_index, pos_index = build_snp_lookup_index(allSnps, tableObjDict)
-    print(f"[LOG] filterVCF: Built lookup indices for fast matching")
+    # Log association keys for debugging
+    if 'associations' in tableObjDict:
+        assoc_keys = list(tableObjDict['associations'].keys())
+        print(f"[LOG] filterVCF: Association keys available: {len(assoc_keys)}")
+        if len(assoc_keys) < 10:
+            print(f"[LOG] filterVCF: Sample association keys: {assoc_keys[:5]}")
+        else:
+            print(f"[LOG] filterVCF: Sample association keys: {assoc_keys[:5]}...")
     
     # Extract genomic regions for targeted BCF queries (performance optimization)
     regions_list = []
@@ -565,46 +530,60 @@ def filterVCF(tableObjDict, allClumpsObjDict, allSnps, inputFiles, filteredFileP
                         # a record exists, so the file was not empty
                         fileEmpty = False
                         
-                        # Use optimized index-based matching
-                        matched_snp = None
+                        # Check if we should use chromPos for matching
+                        identifier_to_check = rsID
                         
-                        if useGWASupload:
-                            # GWAS upload mode: Direct position matching
-                            if chromPos in pos_index:
-                                matched_snp = pos_index[chromPos]
-                            elif chromPos in allSnps:
-                                matched_snp = chromPos
-                        else:
-                            # Try rsID first (fastest)
-                            if rsID and rsID != '.' and rsID in rsid_index:
-                                matched_snp = rsid_index[rsID]
-                            # Fall back to position matching
-                            elif chromPos in pos_index:
-                                matched_snp = pos_index[chromPos]
-                            # Legacy: check if chromPos maps to rsID
-                            elif chromPos in tableObjDict.get('associations', {}):
-                                if isinstance(tableObjDict['associations'][chromPos], str):
-                                    rsID = tableObjDict['associations'][chromPos]
-                                    if rsID in rsid_index:
-                                        matched_snp = rsid_index[rsID]
+                        if useGWASupload and chromPos in allSnps:
+                            # GWAS upload mode: Use chromPos directly
+                            identifier_to_check = chromPos
+                        elif rsID is None or rsID == '.' or rsID == '':
+                            # BCF has no rsID (rsID='.'), try position-based matching
+                            # Check if any SNP in our set maps to this position
+                            position_match_found = False
+                            for snp in allSnps:
+                                if snp in tableObjDict.get('associations', {}):
+                                    assoc = tableObjDict['associations'][snp]
+                                    if 'pos' in assoc and assoc['pos']:
+                                        # Convert database position to BCF format for comparison
+                                        db_pos = assoc['pos']
+                                        if ':' in db_pos:
+                                            db_chrom, db_pos_num = db_pos.split(':')
+                                            if not db_chrom.startswith('chr'):
+                                                db_chrom = 'chr' + db_chrom
+                                            db_chrompos = f"{db_chrom}:{db_pos_num}"
+                                            
+                                            if db_chrompos == chromPos:
+                                                identifier_to_check = snp  # Use the rsID from database
+                                                position_match_found = True
+                                                if variant_count <= 5:
+                                                    print(f"[LOG] filterVCF: Position match found! BCF {chromPos} matches DB {snp} at {db_pos}")
+                                                break
+                            
+                            if not position_match_found:
+                                identifier_to_check = chromPos  # Fallback to chromPos
+                        elif (chromPos in tableObjDict['associations'] and rsID not in tableObjDict['associations']):
+                            # Legacy logic for when chromPos maps to rsID
+                            if isinstance(tableObjDict['associations'][chromPos], str):
+                                rsID = tableObjDict['associations'][chromPos]
+                                identifier_to_check = rsID
                         
                         # check if the snp is in the filtered studies
-                        identifier_in_snps = matched_snp is not None
+                        identifier_in_snps = identifier_to_check in allSnps
                         chromPos_in_assoc = chromPos in tableObjDict.get('associations', {})
                         
                         if variant_count <= 5:  # Log matching details for first few variants
-                            print(f"[LOG] filterVCF: Matching check - identifier='{matched_snp}', identifier_in_snps={identifier_in_snps}, chromPos_in_assoc={chromPos_in_assoc}, useGWASupload={useGWASupload}")
+                            print(f"[LOG] filterVCF: Matching check - identifier='{identifier_to_check}', identifier_in_snps={identifier_in_snps}, chromPos_in_assoc={chromPos_in_assoc}, useGWASupload={useGWASupload}")
                         
                         if identifier_in_snps:
-                            usedSnps.add(matched_snp)
+                            usedSnps.add(identifier_to_check)
                             matched_count += 1
                             if matched_count <= 5:
-                                print(f"[LOG] filterVCF: MATCH {matched_count}: rsID={rsID}, chromPos={chromPos}, matched_snp={matched_snp}")
+                                print(f"[LOG] filterVCF: MATCH {matched_count}: rsID={rsID}, chromPos={chromPos}")
                             # increase count of the ld clump this snp is in
                             # We use the clumpNumDict later in the parsing functions to determine which variants are not in LD with any of the other variants
                             for pop in allClumpsObjDict.keys():
-                                if matched_snp in allClumpsObjDict[pop]:
-                                    clumpNum = allClumpsObjDict[pop][matched_snp]['clumpNum']
+                                if identifier_to_check in allClumpsObjDict[pop]:
+                                    clumpNum = allClumpsObjDict[pop][identifier_to_check]['clumpNum']
                                     clumpNumDict[str((pop, clumpNum))] = clumpNumDict.get(str((pop, clumpNum)), 0) + 1
 
                             # write the line to the filtered VCF

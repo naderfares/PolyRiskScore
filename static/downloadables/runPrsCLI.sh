@@ -979,6 +979,18 @@ calculatePRS () {
             exit 1
         fi
         
+        # Create BCF index if it doesn't exist for faster queries
+        if [ ! -f "${files[0]}.csi" ] && [ ! -f "${files[0]}.bci" ]; then
+            echo "[LOG] Creating BCF index for faster processing..."
+            if bcftools index "${files[0]}" 2>/dev/null; then
+                echo "[LOG] BCF index created successfully"
+            else
+                echo "[LOG] Warning: Failed to create BCF index. Processing will continue without index."
+            fi
+        else
+            echo "[LOG] BCF index already exists"
+        fi
+        
         # Check GWAS file format
         gwas_lower=$(echo "${GWASfilename}" | tr '[:upper:]' '[:lower:]')
         if [[ "${gwas_lower}" != *.tsv ]] && [[ "${gwas_lower}" != *.txt ]]; then
